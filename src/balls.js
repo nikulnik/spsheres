@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 export const BALL_CONFIG = Object.freeze({
   radius: 0.44,
-  speed: 7.4,
+  speed: 9.2,
   splitAngle: THREE.MathUtils.degToRad(16),
   splitCooldown: 0.16,
 });
@@ -15,8 +15,11 @@ const COLLISION_ITERATIONS = 8;
 const CONTACT_EPSILON = 1e-6;
 const RESTITUTION = 1;
 const MIN_INWARD_SPEED = BALL_CONFIG.speed * 0.22;
+const PACKED_FILL_RATIO = 0.72;
+const PRESSURE_IMPACTS_TO_BREAK = 4;
+const OUTSIDE_FRICTION = 1.4;
 
-export function createBallSystem(scene, { frameWidth, courtDepth, environment }) {
+export function createBallSystem(scene, { frameWidth, courtDepth, environment, onBreakout }) {
   const { radius, speed, splitAngle, splitCooldown } = BALL_CONFIG;
   const xLimit = frameWidth / 2 - 0.26 - radius;
   const zLimit = courtDepth / 2 - 0.26 - radius;
@@ -40,7 +43,9 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
   });
   const impactGeometry = new THREE.RingGeometry(radius * 0.85, radius * 0.97, 48);
   const rollingAxis = new THREE.Vector3();
+  const pressure = { north: 0, south: 0, east: 0, west: 0 };
   let accumulator = 0;
+  let opening;
 
   function createBall(x, z, velocityX, velocityZ, isNewborn = false) {
     const mesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
@@ -78,21 +83,34 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
     const { position } = ball.mesh;
     let normalX = 0;
     let normalZ = 0;
+    let side;
 
-    if (position.x >= xLimit) {
+    if (position.x >= xLimit && opening?.side !== 'east') {
       position.x = xLimit;
-      if (ball.velocity.x > 0) normalX = -1;
-    } else if (position.x <= -xLimit) {
+      if (ball.velocity.x > 0) {
+        normalX = -1;
+        side = 'east';
+      }
+    } else if (position.x <= -xLimit && opening?.side !== 'west') {
       position.x = -xLimit;
-      if (ball.velocity.x < 0) normalX = 1;
+      if (ball.velocity.x < 0) {
+        normalX = 1;
+        side = 'west';
+      }
     }
 
-    if (position.z >= zLimit) {
+    if (position.z >= zLimit && opening?.side !== 'south') {
       position.z = zLimit;
-      if (ball.velocity.y > 0) normalZ = -1;
-    } else if (position.z <= -zLimit) {
+      if (ball.velocity.y > 0) {
+        normalZ = -1;
+        side = 'south';
+      }
+    } else if (position.z <= -zLimit && opening?.side !== 'north') {
       position.z = -zLimit;
-      if (ball.velocity.y < 0) normalZ = 1;
+      if (ball.velocity.y < 0) {
+        normalZ = 1;
+        side = 'north';
+      }
     }
 
     if (normalX === 0 && normalZ === 0) return null;
@@ -103,6 +121,7 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
     const dot = ball.velocity.x * normalX + ball.velocity.y * normalZ;
 
     return {
+      side,
       normalX,
       normalZ,
       velocityX: ball.velocity.x - 2 * dot * normalX,
@@ -165,6 +184,37 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
       for (const ball of balls) {
         const collision = collideWithWalls(ball);
         if (collision) ball.velocity.set(collision.velocityX, collision.velocityZ);
+      }
+    }
+  }
+
+  function isOutside(ball, margin = 0) {
+    if (!opening) return false;
+    const { x, z } = ball.mesh.position;
+    if (opening.side === 'east') return x > xLimit + margin;
+    if (opening.side === 'west') return x < -xLimit - margin;
+    if (opening.side === 'south') return z > zLimit + margin;
+    return z < -zLimit - margin;
+  }
+
+  function applyOpeningMotion(delta) {
+    if (!opening) return;
+    const outwardX = opening.side === 'east' ? 1 : opening.side === 'west' ? -1 : 0;
+    const outwardZ = opening.side === 'south' ? 1 : opening.side === 'north' ? -1 : 0;
+
+    for (const ball of balls) {
+      if (isOutside(ball)) {
+        ball.velocity.multiplyScalar(Math.exp(-OUTSIDE_FRICTION * delta));
+        if (ball.velocity.lengthSq() < 0.0025) ball.velocity.set(0, 0);
+        continue;
+      }
+
+      ball.velocity.x += outwardX * speed * 3.5 * delta;
+      ball.velocity.y += outwardZ * speed * 3.5 * delta;
+      if (ball.velocity.lengthSq() > 1e-8) {
+        ball.velocity.setLength(speed);
+      } else {
+        ball.velocity.set(outwardX * speed, outwardZ * speed);
       }
     }
   }
@@ -276,6 +326,7 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
 
   function simulate(delta) {
     const newBalls = [];
+    const fillRatio = (balls.length * Math.PI * radius * radius) / (xLimit * 2 * zLimit * 2);
     let splitCount = 0;
 
     for (const ball of balls) {
@@ -291,13 +342,22 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
       const collision = collideWithWalls(ball);
       if (!collision) continue;
 
-      if (ball.splitCooldown === 0) {
+      if (!opening && ball.splitCooldown === 0) {
         const children = splitBall(ball, collision, newBalls);
         if (children) {
           ball.splitting = true;
           splitCount += 1;
           newBalls.push(...children);
           continue;
+        }
+
+        if (fillRatio >= PACKED_FILL_RATIO) {
+          pressure[collision.side] += 1;
+          if (pressure[collision.side] >= PRESSURE_IMPACTS_TO_BREAK) {
+            opening = { side: collision.side };
+            onBreakout?.(collision.side);
+            continue;
+          }
         }
       }
       ball.velocity.set(collision.velocityX, collision.velocityZ);
@@ -319,6 +379,7 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
       if (collision) ball.velocity.set(collision.velocityX, collision.velocityZ);
     }
 
+    applyOpeningMotion(delta);
     updateImpacts(delta);
   }
 
@@ -326,6 +387,9 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
 
   return {
     balls,
+    get breachSide() {
+      return opening?.side ?? null;
+    },
     update(delta) {
       accumulator += Math.min(delta, MAX_FRAME_DELTA);
       while (accumulator >= FIXED_STEP) {

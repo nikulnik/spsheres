@@ -279,6 +279,7 @@ function addRail(group, geometry, material, x, y, z) {
   rail.castShadow = true;
   rail.receiveShadow = true;
   group.add(rail);
+  return rail;
 }
 
 export function createArenaScene(canvas) {
@@ -310,7 +311,7 @@ export function createArenaScene(canvas) {
     frameHeight / 2,
     -frameHeight / 2,
     0.1,
-    100,
+    180,
   );
   const projectedCourtCenter = (RAIL_HEIGHT * cosElevation) / 2;
   const targetZ = (1 - projectedCourtCenter) / sinElevation;
@@ -320,7 +321,7 @@ export function createArenaScene(canvas) {
   camera.updateProjectionMatrix();
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(80, 80),
+    new THREE.PlaneGeometry(240, 240),
     new THREE.MeshStandardMaterial({ color: '#d5d1c5', roughness: 1 }),
   );
   ground.rotation.x = -Math.PI / 2;
@@ -347,6 +348,7 @@ export function createArenaScene(canvas) {
 
   const { materials: woodMaterials, ready: woodReady } = createWoodMaterials(renderer);
   const rails = new THREE.Group();
+  const boards = { north: [], south: [], east: [], west: [] };
   const horizontalGeometry = applyWoodUVs(
     new RoundedBoxGeometry(frameWidth, PLANK_HEIGHT, RAIL_THICKNESS, 3, 0.025),
     'x',
@@ -372,10 +374,10 @@ export function createArenaScene(canvas) {
     const z = courtDepth / 2 - RAIL_THICKNESS / 2;
     const x = frameWidth / 2 - RAIL_THICKNESS / 2;
 
-    addRail(rails, horizontalGeometry, material, 0, y, -z);
-    addRail(rails, horizontalGeometry, material, 0, y, z);
-    addRail(rails, sideGeometry, material, -x, y, 0);
-    addRail(rails, sideGeometry, material, x, y, 0);
+    boards.north.push(addRail(rails, horizontalGeometry, material, 0, y, -z));
+    boards.south.push(addRail(rails, horizontalGeometry, material, 0, y, z));
+    boards.west.push(addRail(rails, sideGeometry, material, -x, y, 0));
+    boards.east.push(addRail(rails, sideGeometry, material, x, y, 0));
   }
   scene.add(rails);
 
@@ -406,8 +408,84 @@ export function createArenaScene(canvas) {
   environmentScene.dispose();
   pmremGenerator.dispose();
 
-  const ballSystem = createBallSystem(scene, { frameWidth, courtDepth, environment });
+  const cameraTarget = target.clone();
+  const cameraOffset = camera.position.clone().sub(target);
+  const boardBounds = new THREE.Box3();
+  const outwardDirections = {
+    north: new THREE.Vector3(0, 0, -1),
+    south: new THREE.Vector3(0, 0, 1),
+    east: new THREE.Vector3(1, 0, 0),
+    west: new THREE.Vector3(-1, 0, 0),
+  };
+  let breakout;
+  let cameraMove;
+  let cameraTrackingBoard = false;
   let previousTime;
+
+  function releaseBoard(side) {
+    if (breakout) return;
+    const board = boards[side][Math.floor(PLANK_COUNT / 2)];
+    const direction = outwardDirections[side];
+    scene.attach(board);
+
+    const velocity = direction.clone().multiplyScalar(20);
+    velocity.y = 8.2;
+    const spin = side === 'east' || side === 'west'
+      ? new THREE.Vector3(1.1, 0.7, 2.8)
+      : new THREE.Vector3(2.8, 0.7, 1.1);
+    breakout = { board, velocity, spin };
+  }
+
+  function updateBreakout(delta) {
+    if (!breakout) return;
+    const { board, velocity, spin } = breakout;
+    velocity.y -= 7.2 * delta;
+    board.position.addScaledVector(velocity, delta);
+    board.rotation.x += spin.x * delta;
+    board.rotation.y += spin.y * delta;
+    board.rotation.z += spin.z * delta;
+
+    boardBounds.setFromObject(board);
+    const penetration = ground.position.y - boardBounds.min.y;
+    if (penetration > 0) {
+      board.position.y += penetration;
+      velocity.y = Math.abs(velocity.y) > 1.2 ? -velocity.y * 0.22 : 0;
+      const damping = Math.exp(-1.15 * delta);
+      velocity.x *= damping;
+      velocity.z *= damping;
+      spin.multiplyScalar(Math.exp(-1.8 * delta));
+    }
+  }
+
+  function updateCamera(delta) {
+    if (!breakout) return;
+
+    if (!cameraTrackingBoard) {
+      if (!cameraMove) {
+        cameraMove = { elapsed: 0, from: cameraTarget.clone() };
+      }
+
+      cameraMove.elapsed += delta;
+      const progress = Math.min(cameraMove.elapsed / 0.45, 1);
+      const eased = 1 - (1 - progress) ** 3;
+      cameraTarget.lerpVectors(cameraMove.from, breakout.board.position, eased);
+      camera.zoom = THREE.MathUtils.lerp(1, 0.78, eased);
+      camera.updateProjectionMatrix();
+      if (progress === 1) cameraTrackingBoard = true;
+    } else {
+      cameraTarget.copy(breakout.board.position);
+    }
+
+    camera.position.copy(cameraTarget).add(cameraOffset);
+    camera.lookAt(cameraTarget);
+  }
+
+  const ballSystem = createBallSystem(scene, {
+    frameWidth,
+    courtDepth,
+    environment,
+    onBreakout: releaseBoard,
+  });
 
   return {
     camera,
@@ -420,9 +498,11 @@ export function createArenaScene(canvas) {
       renderer.render(scene, camera);
     },
     start: () => renderer.setAnimationLoop((time) => {
-      const delta = previousTime === undefined ? 0 : (time - previousTime) / 1000;
+      const delta = previousTime === undefined ? 0 : Math.min((time - previousTime) / 1000, 0.25);
       previousTime = time;
       ballSystem.update(delta);
+      updateBreakout(delta);
+      updateCamera(delta);
       renderer.shadowMap.needsUpdate = true;
       renderer.render(scene, camera);
     }),
