@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#202622" />
+    <meta
+      name="description"
+      content="3D-сцена с деревянными бортами, камерой 75° и записью видео 1080×1920."
+    />
+    <title>Деревянная арена — 9:16</title>
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div>
+          <p class="eyebrow">THREE.JS SCENE</p>
+          <h1>Деревянная арена</h1>
+        </div>
+        <div class="specs" aria-label="Параметры сцены">
+          <span>9:16</span>
+          <span>75°</span>
+        </div>
+      </header>
+
+      <section class="workspace" aria-label="Трёхмерная сцена">
+        <div class="frame" id="frame">
+          <canvas
+            id="scene"
+            role="img"
+            aria-label="Деревянные борта 9 на 14 в верхней части кадра 9 на 16, с пустым пространством внизу"
+          >
+            Ваш браузер не поддерживает отображение 3D-сцены.
+          </canvas>
+        </div>
+      </section>
+
+      <footer class="controls">
+        <button class="record-button" id="record" type="button">
+          <span class="record-icon" aria-hidden="true"></span>
+          <span id="record-label">Записать 1080 × 1920</span>
+        </button>
+        <div class="recording-info">
+          <span id="status" role="status" aria-live="polite">Готово к записи</span>
+          <span class="format">WebM · 30 fps</span>
+          <output id="timer" aria-label="Длительность записи">00:00</output>
+        </div>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
