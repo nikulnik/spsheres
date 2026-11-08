@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { OBB } from 'three/addons/math/OBB.js';
 import { createBallSystem } from './balls.js';
 
 export const SCENE_CONFIG = Object.freeze({
@@ -397,6 +398,7 @@ export function createArenaScene(canvas) {
   sunlight.shadow.normalBias = 0.025;
   sunlight.shadow.bias = -0.00015;
   scene.add(sunlight);
+  scene.add(sunlight.target);
 
   const fill = new THREE.DirectionalLight('#dce8ef', 0.65);
   fill.position.set(8, 7, -10);
@@ -408,9 +410,30 @@ export function createArenaScene(canvas) {
   environmentScene.dispose();
   pmremGenerator.dispose();
 
+  const ROCK_RADIUS = 2.5;
+  const ROCK_DISTANCE = 44;
+  const BOARD_PHYSICS_STEP = 1 / 90;
   const cameraTarget = target.clone();
+  const cameraFocus = new THREE.Vector3();
   const cameraOffset = camera.position.clone().sub(target);
+  const flightElevation = THREE.MathUtils.degToRad(85);
+  const flightCameraOffset = new THREE.Vector3(
+    0,
+    50 * Math.sin(flightElevation),
+    50 * Math.cos(flightElevation),
+  );
+  const activeCameraOffset = cameraOffset.clone();
   const boardBounds = new THREE.Box3();
+  const boardCollider = new OBB();
+  const closestPoint = new THREE.Vector3();
+  const contactNormal = new THREE.Vector3();
+  const sunlightOffset = sunlight.position.clone();
+  const rockGeometry = new THREE.DodecahedronGeometry(ROCK_RADIUS, 1);
+  const rockMaterial = new THREE.MeshStandardMaterial({
+    color: '#77746d',
+    roughness: 0.96,
+    flatShading: true,
+  });
   const outwardDirections = {
     north: new THREE.Vector3(0, 0, -1),
     south: new THREE.Vector3(0, 0, 1),
@@ -427,23 +450,64 @@ export function createArenaScene(canvas) {
     const board = boards[side][Math.floor(PLANK_COUNT / 2)];
     const direction = outwardDirections[side];
     scene.attach(board);
+    board.geometry.computeBoundingBox();
+
+    const rock = new THREE.Mesh(rockGeometry, rockMaterial);
+    rock.position.copy(board.position).addScaledVector(direction, ROCK_DISTANCE);
+    rock.position.y = ground.position.y + ROCK_RADIUS;
+    rock.rotation.set(0.18, 0.45, -0.08);
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    scene.add(rock);
 
     const velocity = direction.clone().multiplyScalar(20);
     velocity.y = 8.2;
     const spin = side === 'east' || side === 'west'
-      ? new THREE.Vector3(1.1, 0.7, 2.8)
-      : new THREE.Vector3(2.8, 0.7, 1.1);
-    breakout = { board, velocity, spin };
+      ? new THREE.Vector3(0.45, 0.65, 1.4)
+      : new THREE.Vector3(2.2, 0.65, 0.35);
+    breakout = { board, rock, velocity, spin, hitRock: false };
   }
 
-  function updateBreakout(delta) {
-    if (!breakout) return;
+  function resolveRockCollision(delta) {
+    const { board, rock, velocity, spin } = breakout;
+    board.updateMatrixWorld(true);
+    boardCollider.fromBox3(board.geometry.boundingBox).applyMatrix4(board.matrixWorld);
+    boardCollider.clampPoint(rock.position, closestPoint);
+    const distance = closestPoint.distanceTo(rock.position);
+    if (distance >= ROCK_RADIUS) return;
+
+    contactNormal.subVectors(closestPoint, rock.position);
+    if (contactNormal.lengthSq() < 1e-10) {
+      contactNormal.subVectors(board.position, rock.position);
+    }
+    contactNormal.normalize();
+    board.position.addScaledVector(contactNormal, ROCK_RADIUS - distance + 1e-4);
+
+    const normalSpeed = velocity.dot(contactNormal);
+    if (normalSpeed < 0) {
+      velocity.addScaledVector(contactNormal, -normalSpeed);
+    }
+
+    if (!breakout.hitRock) {
+      breakout.hitRock = true;
+      velocity.multiplyScalar(0.08);
+      spin.multiplyScalar(0.1);
+    } else {
+      const damping = Math.exp(-10 * delta);
+      velocity.x *= damping;
+      velocity.z *= damping;
+      spin.multiplyScalar(Math.exp(-8 * delta));
+    }
+  }
+
+  function simulateBreakoutStep(delta) {
     const { board, velocity, spin } = breakout;
     velocity.y -= 7.2 * delta;
     board.position.addScaledVector(velocity, delta);
     board.rotation.x += spin.x * delta;
     board.rotation.y += spin.y * delta;
     board.rotation.z += spin.z * delta;
+    resolveRockCollision(delta);
 
     boardBounds.setFromObject(board);
     const penetration = ground.position.y - boardBounds.min.y;
@@ -457,8 +521,26 @@ export function createArenaScene(canvas) {
     }
   }
 
+  function updateBreakout(delta) {
+    if (!breakout) return;
+    const steps = Math.max(1, Math.ceil(delta / BOARD_PHYSICS_STEP));
+    const step = delta / steps;
+    for (let index = 0; index < steps; index += 1) {
+      simulateBreakoutStep(step);
+    }
+
+    const { board } = breakout;
+    sunlight.target.position.copy(board.position);
+    sunlight.position.copy(board.position).add(sunlightOffset);
+    sunlight.target.updateMatrixWorld();
+  }
+
   function updateCamera(delta) {
     if (!breakout) return;
+    const { board, rock } = breakout;
+    const rockDistance = board.position.distanceTo(rock.position);
+    const rockFocusWeight = THREE.MathUtils.clamp((16 - rockDistance) / 16, 0, 0.5);
+    cameraFocus.copy(board.position).lerp(rock.position, rockFocusWeight);
 
     if (!cameraTrackingBoard) {
       if (!cameraMove) {
@@ -468,15 +550,17 @@ export function createArenaScene(canvas) {
       cameraMove.elapsed += delta;
       const progress = Math.min(cameraMove.elapsed / 0.45, 1);
       const eased = 1 - (1 - progress) ** 3;
-      cameraTarget.lerpVectors(cameraMove.from, breakout.board.position, eased);
-      camera.zoom = THREE.MathUtils.lerp(1, 0.78, eased);
+      cameraTarget.lerpVectors(cameraMove.from, cameraFocus, eased);
+      activeCameraOffset.lerpVectors(cameraOffset, flightCameraOffset, eased);
+      camera.zoom = THREE.MathUtils.lerp(1, 0.42, eased);
       camera.updateProjectionMatrix();
       if (progress === 1) cameraTrackingBoard = true;
     } else {
-      cameraTarget.copy(breakout.board.position);
+      cameraTarget.copy(cameraFocus);
+      activeCameraOffset.copy(flightCameraOffset);
     }
 
-    camera.position.copy(cameraTarget).add(cameraOffset);
+    camera.position.copy(cameraTarget).add(activeCameraOffset);
     camera.lookAt(cameraTarget);
   }
 
