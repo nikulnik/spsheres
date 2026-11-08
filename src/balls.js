@@ -3,7 +3,6 @@ import * as THREE from 'three';
 export const BALL_CONFIG = Object.freeze({
   radius: 0.44,
   speed: 7.4,
-  maxCount: 64,
   splitAngle: THREE.MathUtils.degToRad(16),
   splitCooldown: 0.16,
 });
@@ -18,7 +17,7 @@ const RESTITUTION = 1;
 const MIN_INWARD_SPEED = BALL_CONFIG.speed * 0.22;
 
 export function createBallSystem(scene, { frameWidth, courtDepth, environment }) {
-  const { radius, speed, maxCount, splitAngle, splitCooldown } = BALL_CONFIG;
+  const { radius, speed, splitAngle, splitCooldown } = BALL_CONFIG;
   const xLimit = frameWidth / 2 - 0.26 - radius;
   const zLimit = courtDepth / 2 - 0.26 - radius;
   const balls = [];
@@ -170,14 +169,74 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
     }
   }
 
-  function splitBall(ball, collision) {
+  function isSpaceFree(x, z, parent, newBalls) {
+    if (Math.abs(x) > xLimit || Math.abs(z) > zLimit) return false;
+
+    const minimumDistance = radius * 2 - CONTACT_EPSILON;
+    const minimumDistanceSquared = minimumDistance * minimumDistance;
+    for (const other of balls) {
+      if (other === parent || other.splitting) continue;
+      const dx = x - other.mesh.position.x;
+      const dz = z - other.mesh.position.z;
+      if (dx * dx + dz * dz < minimumDistanceSquared) return false;
+    }
+    for (const other of newBalls) {
+      const dx = x - other.mesh.position.x;
+      const dz = z - other.mesh.position.z;
+      if (dx * dx + dz * dz < minimumDistanceSquared) return false;
+    }
+    return true;
+  }
+
+  function findSplitPlacement(ball, normalX, normalZ, newBalls) {
+    const originX = ball.mesh.position.x;
+    const originZ = ball.mesh.position.z;
+    const centerX = originX + normalX * radius * 0.05;
+    const centerZ = originZ + normalZ * radius * 0.05;
+    const normalAngle = Math.atan2(normalZ, normalX);
+
+    for (let step = 0; step < 12; step += 1) {
+      const angle = normalAngle + (step * Math.PI) / 12;
+      const offsetX = Math.cos(angle) * radius;
+      const offsetZ = Math.sin(angle) * radius;
+      const first = { x: centerX - offsetX, z: centerZ - offsetZ };
+      const second = { x: centerX + offsetX, z: centerZ + offsetZ };
+      if (
+        isSpaceFree(first.x, first.z, ball, newBalls)
+        && isSpaceFree(second.x, second.z, ball, newBalls)
+      ) {
+        return [first, second];
+      }
+    }
+
+    if (isSpaceFree(originX, originZ, ball, newBalls)) {
+      for (let step = 0; step < 24; step += 1) {
+        const angle = normalAngle + (step * Math.PI) / 12;
+        const second = {
+          x: originX + Math.cos(angle) * radius * 2,
+          z: originZ + Math.sin(angle) * radius * 2,
+        };
+        if (isSpaceFree(second.x, second.z, ball, newBalls)) {
+          return [{ x: originX, z: originZ }, second];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function splitBall(ball, collision, newBalls) {
     const { normalX, normalZ, velocityX, velocityZ } = collision;
+    const placement = findSplitPlacement(ball, normalX, normalZ, newBalls);
+    if (!placement) return null;
+
     const baseAngle = Math.atan2(velocityZ, velocityX);
     const tangentX = -normalZ;
     const tangentZ = normalX;
     const children = [];
 
-    for (const direction of [-1, 1]) {
+    for (let index = 0; index < 2; index += 1) {
+      const direction = index === 0 ? -1 : 1;
       const angle = baseAngle + direction * splitAngle;
       let childVelocityX = Math.cos(angle) * speed;
       let childVelocityZ = Math.sin(angle) * speed;
@@ -190,17 +249,7 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
         childVelocityZ = normalZ * MIN_INWARD_SPEED + tangentZ * tangentSpeed * tangentDirection;
       }
 
-      const offset = direction * radius * 0.16;
-      const x = THREE.MathUtils.clamp(
-        ball.mesh.position.x + tangentX * offset + normalX * radius * 0.08,
-        -xLimit,
-        xLimit,
-      );
-      const z = THREE.MathUtils.clamp(
-        ball.mesh.position.z + tangentZ * offset + normalZ * radius * 0.08,
-        -zLimit,
-        zLimit,
-      );
+      const { x, z } = placement[index];
       children.push(createBall(x, z, childVelocityX, childVelocityZ, true));
     }
 
@@ -242,14 +291,16 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment })
       const collision = collideWithWalls(ball);
       if (!collision) continue;
 
-      const activeCount = balls.length - splitCount + newBalls.length;
-      if (ball.splitCooldown === 0 && activeCount < maxCount) {
-        ball.splitting = true;
-        splitCount += 1;
-        newBalls.push(...splitBall(ball, collision));
-      } else {
-        ball.velocity.set(collision.velocityX, collision.velocityZ);
+      if (ball.splitCooldown === 0) {
+        const children = splitBall(ball, collision, newBalls);
+        if (children) {
+          ball.splitting = true;
+          splitCount += 1;
+          newBalls.push(...children);
+          continue;
+        }
       }
+      ball.velocity.set(collision.velocityX, collision.velocityZ);
     }
 
     if (splitCount > 0) {
