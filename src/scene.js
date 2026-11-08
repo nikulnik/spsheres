@@ -604,7 +604,16 @@ export function createArenaScene(canvas) {
   const ROCK_DISTANCE = 44;
   const ROCK_RESTITUTION = 0.34;
   const ROCK_FRICTION = 0.42;
-  const BOARD_PHYSICS_STEP = 1 / 90;
+  const BOARD_RELEASE_SPEED = 32;
+  const BOARD_RELEASE_LIFT = 8.8;
+  const BOARD_GRAVITY = 9.81;
+  const BOARD_PHYSICS_STEP = 1 / 120;
+  const GROUND_RESTITUTION = 0.18;
+  const GROUND_FRICTION = 0.58;
+  const GROUND_CONTACT_ITERATIONS = 6;
+  const GROUND_SLEEP_SPEED = 0.12;
+  const GROUND_SLEEP_SPIN = 0.1;
+  const GROUND_SLEEP_DELAY = 0.35;
   const cameraTarget = target.clone();
   const cameraFocus = new THREE.Vector3();
   const cameraOffset = camera.position.clone().sub(target);
@@ -632,6 +641,8 @@ export function createArenaScene(canvas) {
   const worldAngularChange = new THREE.Vector3();
   const rotationStep = new THREE.Quaternion();
   const spinAxis = new THREE.Vector3();
+  const groundNormal = new THREE.Vector3(0, 1, 0);
+  const groundContacts = Array.from({ length: 8 }, () => new THREE.Vector3());
   const sunlightOffset = sunlight.position.clone();
   const rockGeometry = createRockGeometry(ROCK_RADIUS);
   const rockMaterial = new THREE.MeshStandardMaterial({
@@ -670,8 +681,8 @@ export function createArenaScene(canvas) {
     rock.receiveShadow = true;
     scene.add(rock);
 
-    const velocity = direction.clone().multiplyScalar(20);
-    velocity.y = 8.2;
+    const velocity = direction.clone().multiplyScalar(BOARD_RELEASE_SPEED);
+    velocity.y = BOARD_RELEASE_LIFT;
     const spin = side === 'east' || side === 'west'
       ? new THREE.Vector3(0.45, 0.65, 1.4)
       : new THREE.Vector3(2.2, 0.65, 0.35);
@@ -690,6 +701,8 @@ export function createArenaScene(canvas) {
       inverseMass: 1 / boardMass,
       inverseInertia,
       hitRock: false,
+      groundRestTime: 0,
+      sleeping: false,
     };
   }
 
@@ -714,8 +727,38 @@ export function createArenaScene(canvas) {
     spin.add(worldAngularChange);
   }
 
+  function applyContactResponse(normal, offset, restitution, friction, minimumBounceSpeed) {
+    const { velocity, spin } = breakout;
+    contactVelocity.copy(spin).cross(offset).add(velocity);
+    const normalSpeed = contactVelocity.dot(normal);
+    if (normalSpeed >= 0) return false;
+
+    const bounce = normalSpeed < -minimumBounceSpeed ? restitution : 0;
+    const normalDenominator = getContactImpulseDenominator(normal, offset);
+    const normalImpulseSize = -(1 + bounce) * normalSpeed / normalDenominator;
+    contactImpulse.copy(normal).multiplyScalar(normalImpulseSize);
+    applyContactImpulse(contactImpulse, offset);
+
+    contactVelocity.copy(spin).cross(offset).add(velocity);
+    tangentDirection.copy(contactVelocity).addScaledVector(normal, -contactVelocity.dot(normal));
+    const tangentSpeed = tangentDirection.length();
+    if (tangentSpeed > 1e-6) {
+      tangentDirection.multiplyScalar(1 / tangentSpeed);
+      const tangentDenominator = getContactImpulseDenominator(tangentDirection, offset);
+      const tangentImpulseSize = THREE.MathUtils.clamp(
+        -tangentSpeed / tangentDenominator,
+        -friction * normalImpulseSize,
+        friction * normalImpulseSize,
+      );
+      contactImpulse.copy(tangentDirection).multiplyScalar(tangentImpulseSize);
+      applyContactImpulse(contactImpulse, offset);
+    }
+
+    return true;
+  }
+
   function resolveRockCollision() {
-    const { board, rock, velocity, spin } = breakout;
+    const { board, rock } = breakout;
     board.updateMatrixWorld(true);
     boardCollider.fromBox3(board.geometry.boundingBox).applyMatrix4(board.matrixWorld);
     boardCollider.clampPoint(rock.position, closestPoint);
@@ -749,40 +792,54 @@ export function createArenaScene(canvas) {
 
     contactOffset.subVectors(closestPoint, board.position);
     board.position.addScaledVector(contactNormal, ROCK_RADIUS - distance + 1e-4);
-    contactVelocity.copy(spin).cross(contactOffset).add(velocity);
-    const normalSpeed = contactVelocity.dot(contactNormal);
-    if (normalSpeed >= 0) return;
+    if (applyContactResponse(contactNormal, contactOffset, ROCK_RESTITUTION, ROCK_FRICTION, 0.8)) {
+      breakout.hitRock = true;
+    }
+  }
 
-    const restitution = normalSpeed < -0.8 ? ROCK_RESTITUTION : 0;
-    const normalDenominator = getContactImpulseDenominator(contactNormal, contactOffset);
-    const normalImpulseSize = -(1 + restitution) * normalSpeed / normalDenominator;
-    contactImpulse.copy(contactNormal).multiplyScalar(normalImpulseSize);
-    applyContactImpulse(contactImpulse, contactOffset);
+  function resolveGroundCollision() {
+    const { board } = breakout;
+    boardBounds.setFromObject(board);
+    const penetration = ground.position.y - boardBounds.min.y;
+    if (penetration <= 0) return false;
 
-    contactVelocity.copy(spin).cross(contactOffset).add(velocity);
-    tangentDirection.copy(contactVelocity).addScaledVector(
-      contactNormal,
-      -contactVelocity.dot(contactNormal),
-    );
-    const tangentSpeed = tangentDirection.length();
-    if (tangentSpeed > 1e-6) {
-      tangentDirection.multiplyScalar(1 / tangentSpeed);
-      const tangentDenominator = getContactImpulseDenominator(tangentDirection, contactOffset);
-      const tangentImpulseSize = THREE.MathUtils.clamp(
-        -tangentSpeed / tangentDenominator,
-        -ROCK_FRICTION * normalImpulseSize,
-        ROCK_FRICTION * normalImpulseSize,
+    board.position.y += penetration + 1e-4;
+    board.updateMatrixWorld(true);
+    const { min, max } = board.geometry.boundingBox;
+    let contactCount = 0;
+
+    for (let corner = 0; corner < 8; corner += 1) {
+      localContact.set(
+        corner & 1 ? max.x : min.x,
+        corner & 2 ? max.y : min.y,
+        corner & 4 ? max.z : min.z,
       );
-      contactImpulse.copy(tangentDirection).multiplyScalar(tangentImpulseSize);
-      applyContactImpulse(contactImpulse, contactOffset);
+      closestPoint.copy(localContact).applyMatrix4(board.matrixWorld);
+      if (closestPoint.y > ground.position.y + 0.02) continue;
+      groundContacts[contactCount].subVectors(closestPoint, board.position);
+      contactCount += 1;
     }
 
-    breakout.hitRock = true;
+    for (let iteration = 0; iteration < GROUND_CONTACT_ITERATIONS; iteration += 1) {
+      for (let index = 0; index < contactCount; index += 1) {
+        applyContactResponse(
+          groundNormal,
+          groundContacts[index],
+          iteration === 0 ? GROUND_RESTITUTION : 0,
+          GROUND_FRICTION,
+          1.1,
+        );
+      }
+    }
+
+    return contactCount > 0;
   }
 
   function simulateBreakoutStep(delta) {
     const { board, velocity, spin } = breakout;
-    velocity.y -= 7.2 * delta;
+    if (breakout.sleeping) return;
+
+    velocity.y -= BOARD_GRAVITY * delta;
     board.position.addScaledVector(velocity, delta);
     const angularSpeed = spin.length();
     if (angularSpeed > 1e-8) {
@@ -791,16 +848,19 @@ export function createArenaScene(canvas) {
       board.quaternion.premultiply(rotationStep);
     }
     resolveRockCollision();
+    const grounded = resolveGroundCollision();
+    const nearlyStill = velocity.lengthSq() < GROUND_SLEEP_SPEED ** 2
+      && spin.lengthSq() < GROUND_SLEEP_SPIN ** 2;
 
-    boardBounds.setFromObject(board);
-    const penetration = ground.position.y - boardBounds.min.y;
-    if (penetration > 0) {
-      board.position.y += penetration;
-      velocity.y = Math.abs(velocity.y) > 1.2 ? -velocity.y * 0.22 : 0;
-      const damping = Math.exp(-1.15 * delta);
-      velocity.x *= damping;
-      velocity.z *= damping;
-      spin.multiplyScalar(Math.exp(-1.8 * delta));
+    if (grounded && nearlyStill) {
+      breakout.groundRestTime += delta;
+      if (breakout.groundRestTime >= GROUND_SLEEP_DELAY) {
+        velocity.set(0, 0, 0);
+        spin.set(0, 0, 0);
+        breakout.sleeping = true;
+      }
+    } else {
+      breakout.groundRestTime = 0;
     }
   }
 
@@ -820,9 +880,14 @@ export function createArenaScene(canvas) {
 
   function updateCamera(delta) {
     if (!breakout) return;
-    const { board, rock } = breakout;
+    const { board, rock, hitRock } = breakout;
     const rockDistance = board.position.distanceTo(rock.position);
-    const rockFocusWeight = THREE.MathUtils.clamp((16 - rockDistance) / 16, 0, 0.5);
+    const rockFocusWeight = hitRock ? 0.5 : THREE.MathUtils.clamp((16 - rockDistance) / 16, 0, 0.5);
+    const horizontalDistance = Math.abs(board.position.x - rock.position.x);
+    const verticalDistance = Math.abs(board.position.z - rock.position.z);
+    const followZoom = hitRock
+      ? Math.min(0.42, frameWidth / (horizontalDistance + 14), frameHeight / (verticalDistance + 14))
+      : 0.42;
     cameraFocus.copy(board.position).lerp(rock.position, rockFocusWeight);
 
     if (!cameraTrackingBoard) {
@@ -835,12 +900,14 @@ export function createArenaScene(canvas) {
       const eased = 1 - (1 - progress) ** 3;
       cameraTarget.lerpVectors(cameraMove.from, cameraFocus, eased);
       activeCameraOffset.lerpVectors(cameraOffset, flightCameraOffset, eased);
-      camera.zoom = THREE.MathUtils.lerp(1, 0.42, eased);
+      camera.zoom = THREE.MathUtils.lerp(1, followZoom, eased);
       camera.updateProjectionMatrix();
       if (progress === 1) cameraTrackingBoard = true;
     } else {
       cameraTarget.copy(cameraFocus);
       activeCameraOffset.copy(flightCameraOffset);
+      camera.zoom = followZoom;
+      camera.updateProjectionMatrix();
     }
 
     camera.position.copy(cameraTarget).add(activeCameraOffset);
