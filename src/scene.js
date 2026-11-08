@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createBallSystem } from './balls.js';
 
 export const SCENE_CONFIG = Object.freeze({
   frameWidth: 9,
@@ -398,6 +400,15 @@ export function createArenaScene(canvas) {
   fill.position.set(8, 7, -10);
   scene.add(fill);
 
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  const environmentScene = new RoomEnvironment();
+  const environment = pmremGenerator.fromScene(environmentScene, 0.04).texture;
+  environmentScene.dispose();
+  pmremGenerator.dispose();
+
+  const ballSystem = createBallSystem(scene, { frameWidth, courtDepth, environment });
+  let previousTime;
+
   return {
     camera,
     courtDepth,
@@ -408,6 +419,12 @@ export function createArenaScene(canvas) {
       renderer.setSize(width, height, false);
       renderer.render(scene, camera);
     },
-    start: () => renderer.setAnimationLoop(() => renderer.render(scene, camera)),
+    start: () => renderer.setAnimationLoop((time) => {
+      const delta = previousTime === undefined ? 0 : (time - previousTime) / 1000;
+      previousTime = time;
+      ballSystem.update(delta);
+      renderer.shadowMap.needsUpdate = true;
+      renderer.render(scene, camera);
+    }),
   };
 }
