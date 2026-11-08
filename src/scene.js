@@ -274,6 +274,196 @@ function createFloorTextures(renderer) {
   return textures;
 }
 
+function latticeNoise(x, y, z) {
+  let hash = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(z, 2147483647);
+  hash = Math.imul(hash ^ (hash >>> 13), 1274126177);
+  return ((hash ^ (hash >>> 16)) >>> 0) / 4294967295;
+}
+
+function sampleNoise3D(x, y, z) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const z0 = Math.floor(z);
+  const tx = x - x0;
+  const ty = y - y0;
+  const tz = z - z0;
+  const sx = tx * tx * (3 - 2 * tx);
+  const sy = ty * ty * (3 - 2 * ty);
+  const sz = tz * tz * (3 - 2 * tz);
+  const bottomFront = THREE.MathUtils.lerp(
+    latticeNoise(x0, y0, z0),
+    latticeNoise(x0 + 1, y0, z0),
+    sx,
+  );
+  const topFront = THREE.MathUtils.lerp(
+    latticeNoise(x0, y0 + 1, z0),
+    latticeNoise(x0 + 1, y0 + 1, z0),
+    sx,
+  );
+  const bottomBack = THREE.MathUtils.lerp(
+    latticeNoise(x0, y0, z0 + 1),
+    latticeNoise(x0 + 1, y0, z0 + 1),
+    sx,
+  );
+  const topBack = THREE.MathUtils.lerp(
+    latticeNoise(x0, y0 + 1, z0 + 1),
+    latticeNoise(x0 + 1, y0 + 1, z0 + 1),
+    sx,
+  );
+
+  return THREE.MathUtils.lerp(
+    THREE.MathUtils.lerp(bottomFront, topFront, sy),
+    THREE.MathUtils.lerp(bottomBack, topBack, sy),
+    sz,
+  );
+}
+
+function createRockGeometry(radius) {
+  const geometry = new THREE.SphereGeometry(radius, 96, 64);
+  const positions = geometry.attributes.position;
+  const direction = new THREE.Vector3();
+
+  for (let index = 0; index < positions.count; index += 1) {
+    direction.fromBufferAttribute(positions, index).normalize();
+    const broad = sampleNoise3D(
+      direction.x * 1.45 + 9.2,
+      direction.y * 1.45 + 3.7,
+      direction.z * 1.45 + 5.1,
+    );
+    const middle = sampleNoise3D(
+      direction.x * 4.2 + 2.4,
+      direction.y * 4.2 + 8.8,
+      direction.z * 4.2 + 1.6,
+    );
+    const fine = sampleNoise3D(
+      direction.x * 11.5 + 6.1,
+      direction.y * 11.5 + 4.3,
+      direction.z * 11.5 + 7.9,
+    );
+    const radialScale = 0.97 + (broad - 0.5) * 0.22 + (middle - 0.5) * 0.07 + (fine - 0.5) * 0.025;
+    const surfaceRadius = radius * radialScale;
+    positions.setXYZ(
+      index,
+      direction.x * surfaceRadius * 1.03,
+      direction.y * surfaceRadius * 0.9,
+      direction.z * surfaceRadius * 0.98,
+    );
+  }
+
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  return geometry;
+}
+
+function createRockTextures(renderer) {
+  const size = 1024;
+  const colorCanvas = document.createElement('canvas');
+  const roughnessCanvas = document.createElement('canvas');
+  const heightCanvas = document.createElement('canvas');
+  const normalCanvas = document.createElement('canvas');
+
+  for (const canvas of [colorCanvas, roughnessCanvas, heightCanvas, normalCanvas]) {
+    canvas.width = size;
+    canvas.height = size;
+  }
+
+  const colorContext = colorCanvas.getContext('2d');
+  const roughnessContext = roughnessCanvas.getContext('2d');
+  const heightContext = heightCanvas.getContext('2d');
+  const normalContext = normalCanvas.getContext('2d');
+  const colorImage = colorContext.createImageData(size, size);
+  const roughnessImage = roughnessContext.createImageData(size, size);
+  const heightImage = heightContext.createImageData(size, size);
+  const random = seededRandom(191);
+  const noise = [5, 13, 32, 96, 224].map((resolution) => createNoiseGrid(resolution, random));
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = (y * size + x) * 4;
+      const u = x / size;
+      const v = y / size;
+      const broad = sampleNoise(noise[0], u, v) * 0.58 + sampleNoise(noise[1], u, v) * 0.42;
+      const middle = sampleNoise(noise[2], u, v);
+      const fine = sampleNoise(noise[3], u, v);
+      const micro = sampleNoise(noise[4], u, v);
+      const grain = random() - 0.5;
+      const mineral = random();
+      const darkMineral = mineral > 0.972 ? (mineral - 0.972) / 0.028 : 0;
+      const lightMineral = mineral < 0.022 ? (0.022 - mineral) / 0.022 : 0;
+      const shade = (broad - 0.5) * 58
+        + (middle - 0.5) * 32
+        + (fine - 0.5) * 18
+        + (micro - 0.5) * 9
+        + grain * 9
+        - darkMineral * 42
+        + lightMineral * 48;
+
+      colorImage.data[index] = 116 + shade + (middle - 0.5) * 5;
+      colorImage.data[index + 1] = 114 + shade;
+      colorImage.data[index + 2] = 108 + shade - (broad - 0.5) * 5;
+      colorImage.data[index + 3] = 255;
+
+      const roughness = 224 + (middle - 0.5) * 24 + (fine - 0.5) * 18 + grain * 8 - lightMineral * 18;
+      roughnessImage.data[index] = roughness;
+      roughnessImage.data[index + 1] = roughness;
+      roughnessImage.data[index + 2] = roughness;
+      roughnessImage.data[index + 3] = 255;
+
+      const height = 128
+        + (broad - 0.5) * 25
+        + (middle - 0.5) * 35
+        + (fine - 0.5) * 38
+        + (micro - 0.5) * 20
+        + grain * 10
+        - darkMineral * 12;
+      heightImage.data[index] = height;
+      heightImage.data[index + 1] = height;
+      heightImage.data[index + 2] = height;
+      heightImage.data[index + 3] = 255;
+    }
+  }
+
+  colorContext.putImageData(colorImage, 0, 0);
+  roughnessContext.putImageData(roughnessImage, 0, 0);
+  heightContext.putImageData(heightImage, 0, 0);
+
+  const heights = heightContext.getImageData(0, 0, size, size).data;
+  const normalImage = normalContext.createImageData(size, size);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = (y * size + x) * 4;
+      const left = heights[(y * size + (x + size - 1) % size) * 4];
+      const right = heights[(y * size + (x + 1) % size) * 4];
+      const top = heights[(((y + size - 1) % size) * size + x) * 4];
+      const bottom = heights[(((y + 1) % size) * size + x) * 4];
+      const nx = ((left - right) / 255) * 3.4;
+      const ny = ((top - bottom) / 255) * 3.4;
+      const inverseLength = 1 / Math.hypot(nx, ny, 1);
+      normalImage.data[index] = (nx * inverseLength * 0.5 + 0.5) * 255;
+      normalImage.data[index + 1] = (ny * inverseLength * 0.5 + 0.5) * 255;
+      normalImage.data[index + 2] = (inverseLength * 0.5 + 0.5) * 255;
+      normalImage.data[index + 3] = 255;
+    }
+  }
+  normalContext.putImageData(normalImage, 0, 0);
+
+  const textures = {
+    map: new THREE.CanvasTexture(colorCanvas),
+    roughnessMap: new THREE.CanvasTexture(roughnessCanvas),
+    normalMap: new THREE.CanvasTexture(normalCanvas),
+  };
+  textures.map.colorSpace = THREE.SRGBColorSpace;
+
+  for (const texture of Object.values(textures)) {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+  }
+
+  return textures;
+}
+
 function addRail(group, geometry, material, x, y, z) {
   const rail = new THREE.Mesh(geometry, material);
   rail.position.set(x, y, z);
@@ -412,6 +602,8 @@ export function createArenaScene(canvas) {
 
   const ROCK_RADIUS = 2.5;
   const ROCK_DISTANCE = 44;
+  const ROCK_RESTITUTION = 0.34;
+  const ROCK_FRICTION = 0.42;
   const BOARD_PHYSICS_STEP = 1 / 90;
   const cameraTarget = target.clone();
   const cameraFocus = new THREE.Vector3();
@@ -424,15 +616,30 @@ export function createArenaScene(canvas) {
   );
   const activeCameraOffset = cameraOffset.clone();
   const boardBounds = new THREE.Box3();
+  const rockBounds = new THREE.Box3();
   const boardCollider = new OBB();
   const closestPoint = new THREE.Vector3();
   const contactNormal = new THREE.Vector3();
+  const contactOffset = new THREE.Vector3();
+  const contactVelocity = new THREE.Vector3();
+  const tangentDirection = new THREE.Vector3();
+  const contactImpulse = new THREE.Vector3();
+  const inverseBoardRotation = new THREE.Quaternion();
+  const localContact = new THREE.Vector3();
+  const localOffset = new THREE.Vector3();
+  const localDirection = new THREE.Vector3();
+  const localTorque = new THREE.Vector3();
+  const worldAngularChange = new THREE.Vector3();
+  const rotationStep = new THREE.Quaternion();
+  const spinAxis = new THREE.Vector3();
   const sunlightOffset = sunlight.position.clone();
-  const rockGeometry = new THREE.DodecahedronGeometry(ROCK_RADIUS, 1);
+  const rockGeometry = createRockGeometry(ROCK_RADIUS);
   const rockMaterial = new THREE.MeshStandardMaterial({
-    color: '#77746d',
-    roughness: 0.96,
-    flatShading: true,
+    ...createRockTextures(renderer),
+    color: '#ffffff',
+    roughness: 1,
+    normalScale: new THREE.Vector2(0.85, 0.85),
+    envMapIntensity: 0.45,
   });
   const outwardDirections = {
     north: new THREE.Vector3(0, 0, -1),
@@ -454,8 +661,11 @@ export function createArenaScene(canvas) {
 
     const rock = new THREE.Mesh(rockGeometry, rockMaterial);
     rock.position.copy(board.position).addScaledVector(direction, ROCK_DISTANCE);
-    rock.position.y = ground.position.y + ROCK_RADIUS;
+    rock.position.y = 0;
     rock.rotation.set(0.18, 0.45, -0.08);
+    rock.updateMatrixWorld(true);
+    rockBounds.setFromObject(rock);
+    rock.position.y = ground.position.y - rockBounds.min.y;
     rock.castShadow = true;
     rock.receiveShadow = true;
     scene.add(rock);
@@ -465,49 +675,122 @@ export function createArenaScene(canvas) {
     const spin = side === 'east' || side === 'west'
       ? new THREE.Vector3(0.45, 0.65, 1.4)
       : new THREE.Vector3(2.2, 0.65, 0.35);
-    breakout = { board, rock, velocity, spin, hitRock: false };
+    const boardSize = board.geometry.boundingBox.getSize(new THREE.Vector3());
+    const boardMass = 1.4;
+    const inverseInertia = new THREE.Vector3(
+      12 / (boardMass * (boardSize.y ** 2 + boardSize.z ** 2)),
+      12 / (boardMass * (boardSize.x ** 2 + boardSize.z ** 2)),
+      12 / (boardMass * (boardSize.x ** 2 + boardSize.y ** 2)),
+    );
+    breakout = {
+      board,
+      rock,
+      velocity,
+      spin,
+      inverseMass: 1 / boardMass,
+      inverseInertia,
+      hitRock: false,
+    };
   }
 
-  function resolveRockCollision(delta) {
+  function getContactImpulseDenominator(direction, offset) {
+    const { board, inverseMass, inverseInertia } = breakout;
+    inverseBoardRotation.copy(board.quaternion).invert();
+    localOffset.copy(offset).applyQuaternion(inverseBoardRotation);
+    localDirection.copy(direction).applyQuaternion(inverseBoardRotation);
+    localTorque.crossVectors(localOffset, localDirection).multiply(inverseInertia);
+    worldAngularChange.copy(localTorque).applyQuaternion(board.quaternion).cross(offset);
+    return inverseMass + worldAngularChange.dot(direction);
+  }
+
+  function applyContactImpulse(impulse, offset) {
+    const { board, velocity, spin, inverseMass, inverseInertia } = breakout;
+    velocity.addScaledVector(impulse, inverseMass);
+    inverseBoardRotation.copy(board.quaternion).invert();
+    localOffset.copy(offset).applyQuaternion(inverseBoardRotation);
+    localDirection.copy(impulse).applyQuaternion(inverseBoardRotation);
+    localTorque.crossVectors(localOffset, localDirection).multiply(inverseInertia);
+    worldAngularChange.copy(localTorque).applyQuaternion(board.quaternion);
+    spin.add(worldAngularChange);
+  }
+
+  function resolveRockCollision() {
     const { board, rock, velocity, spin } = breakout;
     board.updateMatrixWorld(true);
     boardCollider.fromBox3(board.geometry.boundingBox).applyMatrix4(board.matrixWorld);
     boardCollider.clampPoint(rock.position, closestPoint);
-    const distance = closestPoint.distanceTo(rock.position);
+    let distance = closestPoint.distanceTo(rock.position);
     if (distance >= ROCK_RADIUS) return;
 
-    contactNormal.subVectors(closestPoint, rock.position);
-    if (contactNormal.lengthSq() < 1e-10) {
-      contactNormal.subVectors(board.position, rock.position);
-    }
-    contactNormal.normalize();
-    board.position.addScaledVector(contactNormal, ROCK_RADIUS - distance + 1e-4);
+    if (boardCollider.containsPoint(rock.position)) {
+      localContact.copy(rock.position);
+      board.worldToLocal(localContact);
+      localOffset.copy(localContact);
+      const { min, max } = board.geometry.boundingBox;
+      distance = Infinity;
 
-    const normalSpeed = velocity.dot(contactNormal);
-    if (normalSpeed < 0) {
-      velocity.addScaledVector(contactNormal, -normalSpeed);
-    }
+      for (const axis of ['x', 'y', 'z']) {
+        const negativeDistance = localContact[axis] - min[axis];
+        const positiveDistance = max[axis] - localContact[axis];
+        const faceDistance = Math.min(negativeDistance, positiveDistance);
+        if (faceDistance >= distance) continue;
+        const faceSign = negativeDistance < positiveDistance ? -1 : 1;
+        distance = faceDistance;
+        localOffset[axis] = faceSign < 0 ? min[axis] : max[axis];
+        contactNormal.set(0, 0, 0);
+        contactNormal[axis] = faceSign;
+      }
 
-    if (!breakout.hitRock) {
-      breakout.hitRock = true;
-      velocity.multiplyScalar(0.08);
-      spin.multiplyScalar(0.1);
+      closestPoint.copy(localOffset).applyMatrix4(board.matrixWorld);
+      contactNormal.applyQuaternion(board.quaternion);
     } else {
-      const damping = Math.exp(-10 * delta);
-      velocity.x *= damping;
-      velocity.z *= damping;
-      spin.multiplyScalar(Math.exp(-8 * delta));
+      contactNormal.subVectors(closestPoint, rock.position).normalize();
     }
+
+    contactOffset.subVectors(closestPoint, board.position);
+    board.position.addScaledVector(contactNormal, ROCK_RADIUS - distance + 1e-4);
+    contactVelocity.copy(spin).cross(contactOffset).add(velocity);
+    const normalSpeed = contactVelocity.dot(contactNormal);
+    if (normalSpeed >= 0) return;
+
+    const restitution = normalSpeed < -0.8 ? ROCK_RESTITUTION : 0;
+    const normalDenominator = getContactImpulseDenominator(contactNormal, contactOffset);
+    const normalImpulseSize = -(1 + restitution) * normalSpeed / normalDenominator;
+    contactImpulse.copy(contactNormal).multiplyScalar(normalImpulseSize);
+    applyContactImpulse(contactImpulse, contactOffset);
+
+    contactVelocity.copy(spin).cross(contactOffset).add(velocity);
+    tangentDirection.copy(contactVelocity).addScaledVector(
+      contactNormal,
+      -contactVelocity.dot(contactNormal),
+    );
+    const tangentSpeed = tangentDirection.length();
+    if (tangentSpeed > 1e-6) {
+      tangentDirection.multiplyScalar(1 / tangentSpeed);
+      const tangentDenominator = getContactImpulseDenominator(tangentDirection, contactOffset);
+      const tangentImpulseSize = THREE.MathUtils.clamp(
+        -tangentSpeed / tangentDenominator,
+        -ROCK_FRICTION * normalImpulseSize,
+        ROCK_FRICTION * normalImpulseSize,
+      );
+      contactImpulse.copy(tangentDirection).multiplyScalar(tangentImpulseSize);
+      applyContactImpulse(contactImpulse, contactOffset);
+    }
+
+    breakout.hitRock = true;
   }
 
   function simulateBreakoutStep(delta) {
     const { board, velocity, spin } = breakout;
     velocity.y -= 7.2 * delta;
     board.position.addScaledVector(velocity, delta);
-    board.rotation.x += spin.x * delta;
-    board.rotation.y += spin.y * delta;
-    board.rotation.z += spin.z * delta;
-    resolveRockCollision(delta);
+    const angularSpeed = spin.length();
+    if (angularSpeed > 1e-8) {
+      spinAxis.copy(spin).multiplyScalar(1 / angularSpeed);
+      rotationStep.setFromAxisAngle(spinAxis, angularSpeed * delta);
+      board.quaternion.premultiply(rotationStep);
+    }
+    resolveRockCollision();
 
     boardBounds.setFromObject(board);
     const penetration = ground.position.y - boardBounds.min.y;
