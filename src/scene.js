@@ -621,6 +621,7 @@ export function createArenaScene(canvas) {
   const SIDE_CAMERA_DURATION = 1.4;
   const SIDE_CAMERA_ELEVATION = THREE.MathUtils.degToRad(38);
   const SIDE_CAMERA_DISTANCE = 42;
+  const SIDE_CAMERA_ZOOM_FACTOR = 1.02;
   const SECOND_ROCK_SCALE = 0.58;
   const SECOND_ROCK_DURATION = 0.24;
   const SECOND_ROCK_OFFSET = 4.4;
@@ -639,6 +640,7 @@ export function createArenaScene(canvas) {
   const activeCameraOffset = cameraOffset.clone();
   const sideCameraOffset = new THREE.Vector3();
   const boardLongAxis = new THREE.Vector3();
+  const chainDirection = new THREE.Vector3();
   const sideDirection = new THREE.Vector3();
   const launchDirection = new THREE.Vector3();
   const boardBounds = new THREE.Box3();
@@ -1120,13 +1122,13 @@ export function createArenaScene(canvas) {
       0.55,
       frameWidth / (halfWidth * 2 + 4),
       frameHeight / (halfHeight * 2 + 4),
-    );
+    ) * SIDE_CAMERA_ZOOM_FACTOR;
   }
 
   function startSideCamera() {
-    const { board } = breakout;
-    getBoardLongAxis(board, boardLongAxis);
-    sideDirection.set(-boardLongAxis.z, 0, boardLongAxis.x);
+    const { dominoChain } = breakout;
+    chainDirection.set(0, 0, 1).applyQuaternion(dominoChain.group.quaternion);
+    sideDirection.set(-chainDirection.z, 0, chainDirection.x);
     if (sideDirection.x * activeCameraOffset.x + sideDirection.z * activeCameraOffset.z < 0) {
       sideDirection.negate();
     }
@@ -1193,6 +1195,9 @@ export function createArenaScene(canvas) {
   function updateCamera(delta) {
     if (!breakout) return;
     const { board, rock, hitRock, phase } = breakout;
+    const needsSideCamera = phase === 'sideView' || phase === 'eruption'
+      || phase === 'secondFlight' || phase === 'finished';
+    if (needsSideCamera && !sideCameraMove) startSideCamera();
 
     const sideTransitioning = sideCameraMove && sideCameraMove.elapsed < SIDE_CAMERA_DURATION
       && (phase === 'secondFlight' || phase === 'finished');

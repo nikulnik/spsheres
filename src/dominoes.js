@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { OBB } from 'three/addons/math/OBB.js';
 
 export const DOMINO_CONFIG = Object.freeze({
-  count: 10,
+  count: 12,
   scaleFactor: 1.5,
   width: 0.34,
   height: 0.62,
@@ -15,7 +15,7 @@ const GRAVITY = 9.81;
 const FALLEN_ANGLE = Math.PI / 2;
 const INITIAL_TIP_SPEED = 4;
 const BOARD_CONTACT_OVERLAP = 0.03;
-const COLLISION_ITERATIONS = 6;
+const COLLISION_ITERATIONS = 8;
 const RESTITUTION = 0.06;
 const GROUND_FRICTION = 0.45;
 const POSITION_CORRECTION = 0.8;
@@ -31,6 +31,8 @@ const DOMINO_COLORS = [
   '#3b82f6',
   '#8b5cf6',
   '#ec4899',
+  '#6366f1',
+  '#f43f5e',
 ];
 
 function updateRectangle(domino) {
