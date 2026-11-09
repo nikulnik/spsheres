@@ -131,6 +131,143 @@ function sampleNoise(grid, u, v) {
   return THREE.MathUtils.lerp(top, bottom, sy);
 }
 
+function createWrappingNoise(size, layers, random) {
+  const values = new Float32Array(size * size);
+  const left = new Int32Array(size);
+  const right = new Int32Array(size);
+  const across = new Float32Array(size);
+  let totalWeight = 0;
+
+  for (const [cells, weight] of layers) {
+    totalWeight += weight;
+    const grid = new Float32Array(cells * cells);
+    for (let index = 0; index < grid.length; index += 1) grid[index] = random() * weight;
+
+    for (let x = 0; x < size; x += 1) {
+      const cell = Math.floor((x * cells) / size);
+      const fraction = (x * cells) / size - cell;
+      left[x] = cell % cells;
+      right[x] = (cell + 1) % cells;
+      across[x] = fraction * fraction * (3 - 2 * fraction);
+    }
+
+    const row = new Float32Array(cells);
+    for (let y = 0; y < size; y += 1) {
+      const cell = Math.floor((y * cells) / size);
+      const fraction = (y * cells) / size - cell;
+      const down = fraction * fraction * (3 - 2 * fraction);
+      const top = (cell % cells) * cells;
+      const bottom = ((cell + 1) % cells) * cells;
+      for (let column = 0; column < cells; column += 1) {
+        row[column] = grid[top + column] + (grid[bottom + column] - grid[top + column]) * down;
+      }
+      for (let x = 0; x < size; x += 1) {
+        const start = y * size + x;
+        values[start] += row[left[x]] + (row[right[x]] - row[left[x]]) * across[x];
+      }
+    }
+  }
+
+  for (let index = 0; index < values.length; index += 1) values[index] /= totalWeight;
+  return values;
+}
+
+function paintGrassBlade(data, size, x, y, tall, random) {
+  const kind = random();
+  const tone = random();
+  let red = 60 + 46 * tone;
+  let green = 92 + 50 * tone;
+  let blue = 32 + 16 * tone;
+  if (kind < 0.04) {
+    red = 166;
+    green = 154;
+    blue = 94;
+  } else if (kind < 0.2) {
+    red = 128;
+    green = 156;
+    blue = 56;
+  }
+
+  const shaded = 0.55 + 0.55 * tall;
+  const steps = Math.ceil(5 + 15 * (0.35 + 0.65 * tall) * (0.6 + 0.4 * random()));
+  const angle = -Math.PI / 2 + (random() - 0.5) * 1.5;
+  let directionX = Math.cos(angle);
+  let directionY = Math.sin(angle);
+  const curl = (random() - 0.5) * 0.1;
+  const cosine = Math.cos(curl);
+  const sine = Math.sin(curl);
+  const thick = random() < 0.5 ? steps / 2 : 0;
+  let light = shaded * 0.72;
+  const lighter = (shaded * 0.48) / steps;
+  const mask = size - 1;
+
+  for (let step = 0; step <= steps; step += 1) {
+    const row = (((y + size + 0.5) | 0) & mask) * size;
+    const column = ((x + size + 0.5) | 0) & mask;
+    let index = (row + column) * 4;
+    data[index] = red * light;
+    data[index + 1] = green * light;
+    data[index + 2] = blue * light;
+    if (step < thick) {
+      index = (row + ((column + 1) & mask)) * 4;
+      data[index] = red * light * 0.9;
+      data[index + 1] = green * light * 0.9;
+      data[index + 2] = blue * light * 0.9;
+    }
+    light += lighter;
+    x += directionX;
+    y += directionY;
+    const turned = directionX * cosine - directionY * sine;
+    directionY = directionX * sine + directionY * cosine;
+    directionX = turned;
+  }
+}
+
+function createGroundTexture(renderer) {
+  const size = 512;
+  const data = new Uint8ClampedArray(size * size * 4);
+  data.set([40, 46, 24, 255]);
+  for (let done = 4; done < data.length; done *= 2) {
+    data.copyWithin(done, 0, Math.min(done, data.length - done));
+  }
+
+  let state = 1;
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  const coarse = size / 4;
+  const tufts = createWrappingNoise(coarse, [[16, 1], [40, 0.7]], random);
+  const bladeCount = 26000;
+
+  for (let blade = 0; blade < bladeCount; blade += 1) {
+    const tall = (blade + random()) / bladeCount;
+    for (;;) {
+      const x = random() * size;
+      const y = random() * size;
+      const tuft = tufts[(y >> 2) * coarse + (x >> 2)];
+      if (random() > 0.2 + 0.8 * tuft) continue;
+      paintGrassBlade(data, size, x, y, tall, random);
+      break;
+    }
+  }
+
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+  texture.repeat.set(1000 / 2.3, 1000 / 2.3);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function createFloorTextures(renderer) {
   const size = 1024;
   const colorCanvas = document.createElement('canvas');
@@ -496,8 +633,7 @@ export function createArenaScene(canvas) {
   renderer.shadowMap.needsUpdate = true;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#d5d1c5');
-  scene.fog = new THREE.Fog('#d5d1c5', 55, 130);
+  scene.background = new THREE.Color('#516822');
 
   const camera = new THREE.OrthographicCamera(
     -frameWidth / 2,
@@ -505,7 +641,7 @@ export function createArenaScene(canvas) {
     frameHeight / 2,
     -frameHeight / 2,
     0.1,
-    180,
+    1000,
   );
   const projectedCourtCenter = (RAIL_HEIGHT * cosElevation) / 2;
   const targetZ = (1 - projectedCourtCenter) / sinElevation;
@@ -516,8 +652,8 @@ export function createArenaScene(canvas) {
   camera.updateProjectionMatrix();
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(300, 300),
-    new THREE.MeshStandardMaterial({ color: '#d5d1c5', roughness: 1 }),
+    new THREE.PlaneGeometry(1000, 1000),
+    new THREE.MeshStandardMaterial({ map: createGroundTexture(renderer), roughness: 1 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.1;
@@ -620,7 +756,7 @@ export function createArenaScene(canvas) {
   const GROUND_SLEEP_DELAY = 0.35;
   const SIDE_CAMERA_DURATION = 1.4;
   const SIDE_CAMERA_ELEVATION = THREE.MathUtils.degToRad(38);
-  const SIDE_CAMERA_DISTANCE = 42;
+  const SIDE_CAMERA_DISTANCE = 200;
   const SIDE_CAMERA_ZOOM_FACTOR = 1.02;
   const SECOND_ROCK_SCALE = 0.58;
   const SECOND_ROCK_DURATION = 0.24;
@@ -1088,14 +1224,16 @@ export function createArenaScene(canvas) {
 
   function updateSideFrame() {
     const { board, rock, launcher, dominoChain } = breakout;
-    dominoChain.getFinalBounds(dominoBounds);
-    boardBounds.setFromObject(board);
-    dominoBounds.union(boardBounds);
-    rockBounds.setFromObject(rock);
-    dominoBounds.union(rockBounds);
-    if (launcher) {
-      launcherBounds.setFromObject(launcher.mesh);
-      dominoBounds.union(launcherBounds);
+    dominoChain.getCameraBounds(dominoBounds);
+    if (dominoChain.lastStarted) {
+      boardBounds.setFromObject(board);
+      dominoBounds.union(boardBounds);
+      rockBounds.setFromObject(rock);
+      dominoBounds.union(rockBounds);
+      if (launcher) {
+        launcherBounds.setFromObject(launcher.mesh);
+        dominoBounds.union(launcherBounds);
+      }
     }
     return dominoBounds.getCenter(dominoCenter);
   }
@@ -1183,12 +1321,14 @@ export function createArenaScene(canvas) {
   }
 
   function updateSideFollowCamera(delta) {
+    const { dominoChain } = breakout;
     const frameTarget = updateSideFrame();
     const frameZoom = getSideFrameZoom(frameTarget, sideCameraOffset);
     const blend = 1 - Math.exp(-delta * 4);
+    const nextZoom = THREE.MathUtils.lerp(camera.zoom, frameZoom, blend);
     cameraTarget.lerp(frameTarget, blend);
     activeCameraOffset.copy(sideCameraOffset);
-    camera.zoom = THREE.MathUtils.lerp(camera.zoom, frameZoom, blend);
+    camera.zoom = dominoChain.lastStarted ? Math.min(camera.zoom, nextZoom) : nextZoom;
     camera.updateProjectionMatrix();
   }
 

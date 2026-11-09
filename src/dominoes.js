@@ -243,11 +243,16 @@ export function createDominoChain(scene, { origin, direction, groundY, material 
     target.fromBox3(geometry.boundingBox).applyMatrix4(domino.mesh.matrixWorld);
   }
 
+  const cameraBounds = new THREE.Box3();
+
   return {
     group,
     dominoes,
     get started() {
       return started;
+    },
+    get lastStarted() {
+      return last.angle > 0;
     },
     get complete() {
       return complete;
@@ -255,6 +260,21 @@ export function createDominoChain(scene, { origin, direction, groundY, material 
     getFinalBounds(target) {
       group.updateWorldMatrix(true, false);
       return target.copy(finalLocalBounds).applyMatrix4(group.matrixWorld);
+    },
+    getCameraBounds(target) {
+      if (last.angle > 0) return target.setFromObject(group);
+
+      let activeIndex = 0;
+      for (let index = 1; index < count - 1; index += 1) {
+        if (dominoes[index].angle > 0) activeIndex = index;
+      }
+      const firstIndex = Math.max(0, activeIndex - 1);
+      const lastIndex = Math.min(count - 2, activeIndex + 2);
+      target.setFromObject(dominoes[firstIndex].mesh);
+      for (let index = firstIndex + 1; index <= lastIndex; index += 1) {
+        target.union(cameraBounds.setFromObject(dominoes[index].mesh));
+      }
+      return target;
     },
     update(delta, board) {
       group.updateMatrixWorld(true);

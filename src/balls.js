@@ -18,6 +18,11 @@ const MIN_INWARD_SPEED = BALL_CONFIG.speed * 0.22;
 const PACKED_FILL_RATIO = 0.72;
 const PRESSURE_IMPACTS_TO_BREAK = 4;
 const OUTSIDE_FRICTION = 1.4;
+const BALL_COLORS = [
+  { color: '#42bffc', emissive: '#062c46' },
+  { color: '#ff5c8a', emissive: '#461024' },
+  { color: '#ffd166', emissive: '#463608' },
+];
 
 export function createBallSystem(scene, { frameWidth, courtDepth, environment, onBreakout }) {
   const { radius, speed, splitAngle, splitCooldown } = BALL_CONFIG;
@@ -26,8 +31,8 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment, o
   const balls = [];
   const impacts = [];
   const sphereGeometry = new THREE.SphereGeometry(radius, 48, 32);
-  const sphereMaterial = new THREE.MeshPhysicalMaterial({
-    color: '#42bffc',
+  const sphereMaterials = BALL_COLORS.map(({ color, emissive }) => new THREE.MeshPhysicalMaterial({
+    color,
     metalness: 0.18,
     roughness: 0.16,
     clearcoat: 1,
@@ -36,19 +41,21 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment, o
     iridescenceIOR: 1.35,
     iridescenceThicknessMinimum: 120,
     iridescenceThicknessMaximum: 420,
-    emissive: '#062c46',
+    emissive,
     emissiveIntensity: 0.22,
     envMap: environment ?? null,
     envMapIntensity: 1.3,
-  });
+  }));
   const impactGeometry = new THREE.RingGeometry(radius * 0.85, radius * 0.97, 48);
   const rollingAxis = new THREE.Vector3();
   const pressure = { north: 0, south: 0, east: 0, west: 0 };
   let accumulator = 0;
   let opening;
+  let nextColorIndex = 0;
 
   function createBall(x, z, velocityX, velocityZ, isNewborn = false) {
-    const mesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    const mesh = new THREE.Mesh(sphereGeometry, sphereMaterials[nextColorIndex]);
+    nextColorIndex = (nextColorIndex + 1) % sphereMaterials.length;
     mesh.position.set(x, FLOOR_TOP + radius, z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
