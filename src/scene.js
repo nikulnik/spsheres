@@ -3,7 +3,6 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { OBB } from 'three/addons/math/OBB.js';
 import { createBallSystem } from './balls.js';
-import { createGardenEnvironment } from './environment.js';
 
 export const SCENE_CONFIG = Object.freeze({
   frameWidth: 9,
@@ -603,13 +602,6 @@ export function createArenaScene(canvas) {
   const environment = pmremGenerator.fromScene(environmentScene, 0.04).texture;
   environmentScene.dispose();
   pmremGenerator.dispose();
-
-  createGardenEnvironment(scene, {
-    frameWidth,
-    courtDepth,
-    groundY: ground.position.y,
-    environment,
-  });
 
   const ROCK_RADIUS = 2.5;
   const ROCK_DISTANCE = 44;
