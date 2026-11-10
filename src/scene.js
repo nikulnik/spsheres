@@ -677,7 +677,7 @@ function addRail(group, geometry, material, x, y, z) {
   return rail;
 }
 
-export function createArenaScene(canvas, { onCollision, onCameraZoom } = {}) {
+export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout } = {}) {
   const { frameWidth, frameHeight, courtHeightInFrame, cameraElevation, cameraZoom } = SCENE_CONFIG;
   const elevation = THREE.MathUtils.degToRad(cameraElevation);
   const sinElevation = Math.sin(elevation);
@@ -909,6 +909,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom } = {}) {
     const board = boards[side][Math.floor(PLANK_COUNT / 2)];
     const direction = outwardDirections[side];
     scene.attach(board);
+    onBreakout?.(board.position);
     board.geometry.computeBoundingBox();
 
     const rock = new THREE.Mesh(rockGeometry, rockMaterial);

@@ -9,10 +9,11 @@ const SOUND_FILES = Object.freeze({
     'impactPlank_medium_001.ogg',
     'impactPlank_medium_002.ogg',
   ],
+  breakout: ['wood-break.ogg'],
 });
 
-const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07 });
-const SOUND_VOLUME = Object.freeze({ ball: 0.24, wall: 0.32 });
+const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07, breakout: 0 });
+const SOUND_VOLUME = Object.freeze({ ball: 0.24, wall: 0.32, breakout: 0.9 });
 const GLOBAL_PLAY_INTERVAL = 0.02;
 const MAX_VOICES = 12;
 const MASTER_VOLUME = 0.7;
@@ -20,9 +21,9 @@ const SILENT_CAMERA_ZOOM = 0.08;
 const CAMERA_VOLUME_RAMP = 0.12;
 
 export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}) {
-  const buffers = { ball: [], wall: [] };
-  const nextVariant = { ball: 0, wall: 0 };
-  const lastKindTime = { ball: -Infinity, wall: -Infinity };
+  const buffers = { ball: [], wall: [], breakout: [] };
+  const nextVariant = { ball: 0, wall: 0, breakout: 0 };
+  const lastKindTime = { ball: -Infinity, wall: -Infinity, breakout: -Infinity };
   let context;
   let master;
   let recordingDestination;
@@ -102,10 +103,20 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
 
   function play({ type, intensity, x = 0 }) {
     const samples = buffers[type];
-    if (distanceLevel === 0 || !context || context.state !== 'running' || !samples?.length || activeVoices >= MAX_VOICES) return;
+    const isBreakout = type === 'breakout';
+    if (
+      distanceLevel === 0
+      || !context
+      || context.state !== 'running'
+      || !samples?.length
+      || (!isBreakout && activeVoices >= MAX_VOICES)
+    ) return;
 
     const now = context.currentTime;
-    if (now - lastPlayTime < GLOBAL_PLAY_INTERVAL || now - lastKindTime[type] < PLAY_INTERVAL[type]) return;
+    if (
+      !isBreakout
+      && (now - lastPlayTime < GLOBAL_PLAY_INTERVAL || now - lastKindTime[type] < PLAY_INTERVAL[type])
+    ) return;
 
     const strength = Math.min(1, Math.max(0, intensity));
     const sampleIndex = nextVariant[type] % samples.length;
@@ -115,7 +126,7 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
 
     const source = context.createBufferSource();
     source.buffer = samples[sampleIndex];
-    source.playbackRate.value = 0.96 + strength * 0.08;
+    source.playbackRate.value = isBreakout ? 1 : 0.96 + strength * 0.08;
 
     const gain = context.createGain();
     gain.gain.value = SOUND_VOLUME[type] * (0.3 + strength * 0.7);

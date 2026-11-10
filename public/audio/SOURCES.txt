@@ -16,3 +16,11 @@ Ball-border collisions:
 impactPlank_medium_000.ogg
 impactPlank_medium_001.ogg
 impactPlank_medium_002.ogg
+
+Board breakout:
+wood-break.ogg — "Punchy bright wood breaking", rubberduck, CC0 1.0.
+https://soundinator.net/s/wood-breaking-c8dfd6
+Original pack: "100 CC0 metal and wood SFX".
+https://opengameart.org/content/100-cc0-metal-and-wood-sfx
+Downloaded MP3: https://cdn.soundinator.net/sounds/im8b88c8dfd6.mp3
+Transcoded to OGG Vorbis without changing the sound.
