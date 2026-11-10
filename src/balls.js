@@ -9,6 +9,7 @@ export const BALL_CONFIG = Object.freeze({
 
 const FLOOR_TOP = 0.03;
 const FIXED_STEP = 1 / 120;
+const INTRO_TIME_SCALE = 1.172;
 const MAX_FRAME_DELTA = 0.25;
 const IMPACT_DURATION = 0.48;
 const COLLISION_ITERATIONS = 8;
@@ -50,6 +51,7 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment, o
   const rollingAxis = new THREE.Vector3();
   const pressure = { north: 0, south: 0, east: 0, west: 0 };
   let accumulator = 0;
+  let stepInterval = FIXED_STEP / INTRO_TIME_SCALE;
   let opening;
   let nextColorIndex = 0;
 
@@ -374,6 +376,7 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment, o
           pressure[collision.side] += 1;
           if (pressure[collision.side] >= PRESSURE_IMPACTS_TO_BREAK) {
             opening = { side: collision.side };
+            stepInterval = FIXED_STEP;
             onBreakout?.(collision.side);
             continue;
           }
@@ -411,9 +414,10 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment, o
     },
     update(delta) {
       accumulator += Math.min(delta, MAX_FRAME_DELTA);
-      while (accumulator >= FIXED_STEP) {
+      // Run the same physics steps more often during the arena intro.
+      while (accumulator >= stepInterval) {
+        accumulator -= stepInterval;
         simulate(FIXED_STEP);
-        accumulator -= FIXED_STEP;
       }
     },
   };

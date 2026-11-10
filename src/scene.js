@@ -11,7 +11,7 @@ export const SCENE_CONFIG = Object.freeze({
   frameHeight: 16,
   courtHeightInFrame: 14,
   cameraElevation: 75,
-  cameraZoom: 0.78,
+  cameraZoom: 0.85,
 });
 
 const RAIL_THICKNESS = 0.26;
@@ -826,7 +826,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
   const SIDE_CAMERA_DURATION = 0.9;
   const SIDE_CAMERA_ELEVATION = THREE.MathUtils.degToRad(38);
   const SIDE_CAMERA_DISTANCE = 200;
-  const SIDE_CAMERA_ZOOM_FACTOR = 0.9;
+  const SIDE_CAMERA_ZOOM_FACTOR = 0.96;
   const CAMERA_FOLLOW_RATE = 10;
   const CAMERA_ZOOM_RATE = 6;
   const CAMERA_CLOSEUP_RATE = 16;

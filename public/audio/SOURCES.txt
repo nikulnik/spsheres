@@ -39,4 +39,4 @@ liquid-burst.ogg — layered "bubble bursting" by florianreichelt and "Water Spl
 https://freesound.org/people/florianreichelt/sounds/683097/
 https://freesound.org/people/qubodup/sounds/210428/
 The high-quality previews were trimmed and mixed so the pop leads into the sound of water splashing onto soil.
-The blend is filtered, faded, peak-limited, and encoded as mono OGG Vorbis.
+The 0.42-second blend has a short fade on the water tail and is peak-limited and encoded as mono OGG Vorbis.
