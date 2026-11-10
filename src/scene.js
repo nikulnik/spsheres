@@ -962,6 +962,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
         direction,
         groundY: ground.position.y,
         material: woodMaterials[1],
+        onCollision,
       });
     }
   }
@@ -985,7 +986,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
 
     try {
       for (let step = 0; step < 2400; step += 1) {
-        if (simulateBreakoutStep(BOARD_PHYSICS_STEP)) {
+        if (simulateBreakoutStep(BOARD_PHYSICS_STEP, true)) {
           return { board: predictedBoard, time: (step + 1) * BOARD_PHYSICS_STEP };
         }
       }
@@ -1046,7 +1047,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     return true;
   }
 
-  function resolveRockCollision(rock = breakout.rock, radius = ROCK_RADIUS) {
+  function resolveRockCollision(rock = breakout.rock, radius = ROCK_RADIUS, silent = false) {
     const { board } = breakout;
     board.updateMatrixWorld(true);
     boardCollider.fromBox3(board.geometry.boundingBox).applyMatrix4(board.matrixWorld);
@@ -1080,9 +1081,19 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     }
 
     contactOffset.subVectors(closestPoint, board.position);
+    contactVelocity.copy(breakout.spin).cross(contactOffset).add(breakout.velocity);
+    const intensity = THREE.MathUtils.clamp(
+      -contactVelocity.dot(contactNormal) / BOARD_RELEASE_SPEED,
+      0,
+      1,
+    );
     board.position.addScaledVector(contactNormal, radius - distance + 1e-4);
     if (applyContactResponse(contactNormal, contactOffset, ROCK_RESTITUTION, ROCK_FRICTION, 0.8)) {
+      const firstRockImpact = rock === breakout.rock && !breakout.hitRock;
       breakout.hitRock = true;
+      if (!silent && firstRockImpact) {
+        onCollision?.({ type: 'rock', intensity, x: board.position.x, z: board.position.z });
+      }
     }
   }
 
@@ -1227,7 +1238,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     }
   }
 
-  function simulateBreakoutStep(delta) {
+  function simulateBreakoutStep(delta, silent = false) {
     const { board, velocity, spin, dominoChain } = breakout;
     breakout.elapsed += delta;
     updateLauncher(delta);
@@ -1250,9 +1261,9 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
       rotationStep.setFromAxisAngle(spinAxis, angularSpeed * delta);
       board.quaternion.premultiply(rotationStep);
     }
-    resolveRockCollision();
+    resolveRockCollision(breakout.rock, ROCK_RADIUS, silent);
     if (breakout.phase === 'secondFlight' && breakout.launcher) {
-      resolveRockCollision(breakout.launcher.mesh, ROCK_RADIUS * SECOND_ROCK_SCALE);
+      resolveRockCollision(breakout.launcher.mesh, ROCK_RADIUS * SECOND_ROCK_SCALE, silent);
     }
     const grounded = resolveGroundCollision();
     dominoChain?.update(delta, board);

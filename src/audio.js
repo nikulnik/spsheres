@@ -9,23 +9,37 @@ const SOUND_FILES = Object.freeze({
     'impactPlank_medium_001.ogg',
     'impactPlank_medium_002.ogg',
   ],
+  domino: [
+    'impactPlank_medium_000.ogg',
+    'impactPlank_medium_001.ogg',
+    'impactPlank_medium_002.ogg',
+    'impactPlank_medium_003.ogg',
+    'impactPlank_medium_004.ogg',
+  ],
   breakout: ['plank-break.ogg'],
+  rock: ['plank-rock.ogg'],
 });
 
-const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07, breakout: 0 });
-const SOUND_VOLUME = Object.freeze({ ball: 0.24, wall: 0.32, breakout: 0.9 });
+const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07, domino: 0, breakout: 0, rock: 0 });
+const SOUND_VOLUME = Object.freeze({ ball: 0.24, wall: 0.32, domino: 0.85, breakout: 0.9, rock: 0.9 });
 const GLOBAL_PLAY_INTERVAL = 0.02;
 const MAX_VOICES = 12;
 const MASTER_VOLUME = 0.7;
 const SILENT_CAMERA_ZOOM = 0.08;
 const CAMERA_VOLUME_RAMP = 0.12;
+const DOMINO_IMPACT_COUNT = 11;
+const DOMINO_FIRST_PLAYBACK_RATE = 1.08;
+const DOMINO_LAST_PLAYBACK_RATE = 0.54;
+const DOMINO_FIRST_VOLUME = 0.5;
+const DOMINO_LAST_VOLUME = 1.25;
 
 export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}) {
-  const buffers = { ball: [], wall: [], breakout: [] };
-  const nextVariant = { ball: 0, wall: 0, breakout: 0 };
-  const lastKindTime = { ball: -Infinity, wall: -Infinity, breakout: -Infinity };
+  const buffers = { ball: [], wall: [], domino: [], breakout: [], rock: [] };
+  const nextVariant = { ball: 0, wall: 0, domino: 0, breakout: 0, rock: 0 };
+  const lastKindTime = { ball: -Infinity, wall: -Infinity, domino: -Infinity, breakout: -Infinity, rock: -Infinity };
   let context;
   let master;
+  let dominoMaster;
   let recordingDestination;
   let activeVoices = 0;
   let lastPlayTime = -Infinity;
@@ -66,6 +80,9 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
       compressor.attack.value = 0.003;
       compressor.release.value = 0.16;
       master.connect(compressor);
+      dominoMaster = context.createGain();
+      dominoMaster.gain.value = MASTER_VOLUME;
+      dominoMaster.connect(compressor);
       compressor.connect(context.destination);
 
       recordingDestination = context.createMediaStreamDestination();
@@ -101,24 +118,29 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
     master.gain.linearRampToValueAtTime(MASTER_VOLUME * distanceLevel, now + CAMERA_VOLUME_RAMP);
   }
 
-  function play({ type, intensity, x = 0 }) {
+  function play({ type, intensity, index = 0, x = 0 }) {
     const samples = buffers[type];
-    const isBreakout = type === 'breakout';
+    const isBoardImpact = type === 'breakout' || type === 'rock';
+    const isDomino = type === 'domino';
+    const bypassesLimits = isBoardImpact || isDomino;
     if (
-      distanceLevel === 0
+      (!isDomino && distanceLevel === 0)
       || !context
       || context.state !== 'running'
       || !samples?.length
-      || (!isBreakout && activeVoices >= MAX_VOICES)
+      || (!bypassesLimits && activeVoices >= MAX_VOICES)
     ) return;
 
     const now = context.currentTime;
     if (
-      !isBreakout
+      !bypassesLimits
       && (now - lastPlayTime < GLOBAL_PLAY_INTERVAL || now - lastKindTime[type] < PLAY_INTERVAL[type])
     ) return;
 
     const strength = Math.min(1, Math.max(0, intensity));
+    const dominoProgress = isDomino
+      ? Math.min(1, Math.max(0, (index - 1) / (DOMINO_IMPACT_COUNT - 1)))
+      : 0;
     const sampleIndex = nextVariant[type] % samples.length;
     nextVariant[type] += 1;
     lastPlayTime = now;
@@ -126,16 +148,24 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
 
     const source = context.createBufferSource();
     source.buffer = samples[sampleIndex];
-    source.playbackRate.value = isBreakout ? 1 : 0.96 + strength * 0.08;
+    if (isDomino) {
+      source.playbackRate.value = DOMINO_FIRST_PLAYBACK_RATE
+        * (DOMINO_LAST_PLAYBACK_RATE / DOMINO_FIRST_PLAYBACK_RATE) ** dominoProgress;
+    } else {
+      source.playbackRate.value = isBoardImpact ? 1 : 0.96 + strength * 0.08;
+    }
 
+    const volumeScale = isDomino
+      ? DOMINO_FIRST_VOLUME + (DOMINO_LAST_VOLUME - DOMINO_FIRST_VOLUME) * dominoProgress
+      : 0.3 + strength * 0.7;
     const gain = context.createGain();
-    gain.gain.value = SOUND_VOLUME[type] * (0.3 + strength * 0.7);
+    gain.gain.value = SOUND_VOLUME[type] * volumeScale;
     const panner = context.createStereoPanner();
     panner.pan.value = Math.max(-0.75, Math.min(0.75, (x / panRange) * 0.75));
 
     source.connect(gain);
     gain.connect(panner);
-    panner.connect(master);
+    panner.connect(isDomino ? dominoMaster : master);
     activeVoices += 1;
     source.onended = () => {
       activeVoices -= 1;

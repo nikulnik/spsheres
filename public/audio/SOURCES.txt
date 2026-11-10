@@ -17,8 +17,18 @@ impactPlank_medium_000.ogg
 impactPlank_medium_001.ogg
 impactPlank_medium_002.ogg
 
+Domino-domino collisions:
+impactPlank_medium_000.ogg through impactPlank_medium_004.ogg (the same CC0 Kenney set).
+The 003 and 004 variants were added for this sequence; playback pitch decreases and gain increases with each domino.
+
 Board breakout:
 plank-break.ogg — "Wood Break.wav", Deathscyp, CC0 1.0.
 https://freesound.org/people/Deathscyp/sounds/443293/
 Downloaded high-quality MP3 preview: https://cdn.freesound.org/previews/443/443293_5701973-hq.mp3
 Transcoded to OGG Vorbis without otherwise changing the sound.
+
+Board-boulder collision:
+plank-rock.ogg — layered "bfh1_wood_hit_02.ogg" and "bfh1_rock_hit_01.ogg" by rubberduck, CC0 1.0.
+Source: https://opengameart.org/content/75-cc0-breaking-falling-hit-sfx
+Download: https://opengameart.org/sites/default/files/sfx_breaking_and_falling.zip
+The wood and rock hits were mixed at 0.6 and 0.75 gain, peak-limited, and transcoded to OGG Vorbis.

@@ -143,8 +143,9 @@ function resolveContact(first, second, contact) {
   const normalSpeedSquared = contact.normalZ ** 2;
   const denominator = (first.inverseMass + second.inverseMass) * normalSpeedSquared
     + firstLeverage * firstFactor + secondLeverage * secondFactor;
-  if (denominator < 1e-12) return;
+  if (denominator < 1e-12) return 0;
 
+  let impactImpulse = 0;
   const relativeNormalSpeed = (second.pivotVelocity - first.pivotVelocity) * contact.normalZ
     + second.angularVelocity * secondLeverage - first.angularVelocity * firstLeverage;
   if (relativeNormalSpeed < 0) {
@@ -153,20 +154,23 @@ function resolveContact(first, second, contact) {
     second.pivotVelocity += impulse * contact.normalZ * second.inverseMass;
     first.angularVelocity -= impulse * firstFactor;
     second.angularVelocity += impulse * secondFactor;
+    impactImpulse = impulse;
   }
 
   const correction = Math.max(contact.penetration - PENETRATION_SLOP, 0)
     * POSITION_CORRECTION / denominator;
-  if (correction === 0) return;
-  first.pivotZ -= correction * contact.normalZ * first.inverseMass;
-  second.pivotZ += correction * contact.normalZ * second.inverseMass;
-  first.angle = THREE.MathUtils.clamp(first.angle - correction * firstFactor, 0, FALLEN_ANGLE);
-  second.angle = THREE.MathUtils.clamp(second.angle + correction * secondFactor, 0, FALLEN_ANGLE);
-  updateRectangle(first);
-  updateRectangle(second);
+  if (correction > 0) {
+    first.pivotZ -= correction * contact.normalZ * first.inverseMass;
+    second.pivotZ += correction * contact.normalZ * second.inverseMass;
+    first.angle = THREE.MathUtils.clamp(first.angle - correction * firstFactor, 0, FALLEN_ANGLE);
+    second.angle = THREE.MathUtils.clamp(second.angle + correction * secondFactor, 0, FALLEN_ANGLE);
+    updateRectangle(first);
+    updateRectangle(second);
+  }
+  return impactImpulse;
 }
 
-export function createDominoChain(scene, { origin, direction, groundY, material }) {
+export function createDominoChain(scene, { origin, direction, groundY, material, onCollision }) {
   const { count, scaleFactor, width, height, depth, spacingRatio } = DOMINO_CONFIG;
   const group = new THREE.Group();
   const chainDirection = direction.clone().setY(0).normalize();
@@ -178,9 +182,11 @@ export function createDominoChain(scene, { origin, direction, groundY, material 
   const geometry = new RoundedBoxGeometry(width, height, depth, 2, 0.018);
   geometry.computeBoundingBox();
   const dominoes = [];
+  const impactedDominoes = new Uint8Array(count);
   const boardCollider = new OBB();
   const firstCollider = new OBB();
   const contact = {};
+  const collisionPosition = new THREE.Vector3();
   let centerDistance = 0;
   let previousHeight = 0;
   let started = false;
@@ -319,7 +325,18 @@ export function createDominoChain(scene, { origin, direction, groundY, material 
             const first = dominoes[firstIndex];
             const second = dominoes[secondIndex];
             if (!findContact(first, second, contact)) continue;
-            resolveContact(first, second, contact);
+            const impact = resolveContact(first, second, contact);
+            if (impact > 0 && !impactedDominoes[secondIndex]) {
+              impactedDominoes[secondIndex] = 1;
+              collisionPosition.set(0, contact.y, contact.z).applyMatrix4(group.matrixWorld);
+              onCollision?.({
+                type: 'domino',
+                index: secondIndex,
+                intensity: 1,
+                x: collisionPosition.x,
+                z: collisionPosition.z,
+              });
+            }
           }
         }
       }
