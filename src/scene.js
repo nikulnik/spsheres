@@ -754,10 +754,15 @@ export function createArenaScene(canvas) {
   const GROUND_SLEEP_SPEED = 0.12;
   const GROUND_SLEEP_SPIN = 0.1;
   const GROUND_SLEEP_DELAY = 0.35;
-  const SIDE_CAMERA_DURATION = 1.4;
+  const SIDE_CAMERA_DURATION = 0.9;
   const SIDE_CAMERA_ELEVATION = THREE.MathUtils.degToRad(38);
   const SIDE_CAMERA_DISTANCE = 200;
-  const SIDE_CAMERA_ZOOM_FACTOR = 1.02;
+  const SIDE_CAMERA_ZOOM_FACTOR = 0.9;
+  const CAMERA_FOLLOW_RATE = 10;
+  const CAMERA_ZOOM_RATE = 6;
+  const CAMERA_CLOSEUP_RATE = 16;
+  const CAMERA_APPROACH_ZOOM = 0.28;
+  const CAMERA_LOOK_AHEAD = 0.4;
   const SECOND_ROCK_SCALE = 0.58;
   const SECOND_ROCK_DURATION = 0.24;
   const SECOND_ROCK_OFFSET = 4.4;
@@ -782,6 +787,7 @@ export function createArenaScene(canvas) {
   const boardBounds = new THREE.Box3();
   const rockBounds = new THREE.Box3();
   const launcherBounds = new THREE.Box3();
+  const futureBoardBounds = new THREE.Box3();
   const dominoBounds = new THREE.Box3();
   const dominoCenter = new THREE.Vector3();
   const dominoSize = new THREE.Vector3();
@@ -870,15 +876,19 @@ export function createArenaScene(canvas) {
       inverseInertia,
       hitRock: false,
       groundRestTime: 0,
+      groundContactCount: 0,
       sleeping: false,
+      elapsed: 0,
+      landingTime: 0,
       phase: 'flight',
       phaseTime: 0,
       launcher: null,
       dominoChain: null,
     };
-    const landingBoard = predictBoardGroundContact();
-    if (landingBoard) {
-      const origin = getFirstDominoOrigin(landingBoard, direction, ground.position.y);
+    const landing = predictBoardGroundContact();
+    if (landing) {
+      breakout.landingTime = landing.time;
+      const origin = getFirstDominoOrigin(landing.board, direction, ground.position.y);
       breakout.dominoChain = createDominoChain(scene, {
         origin,
         direction,
@@ -907,7 +917,9 @@ export function createArenaScene(canvas) {
 
     try {
       for (let step = 0; step < 2400; step += 1) {
-        if (simulateBreakoutStep(BOARD_PHYSICS_STEP)) return predictedBoard;
+        if (simulateBreakoutStep(BOARD_PHYSICS_STEP)) {
+          return { board: predictedBoard, time: (step + 1) * BOARD_PHYSICS_STEP };
+        }
       }
       return null;
     } finally {
@@ -1008,6 +1020,7 @@ export function createArenaScene(canvas) {
 
   function resolveGroundCollision() {
     const { board } = breakout;
+    breakout.groundContactCount = 0;
     boardBounds.setFromObject(board);
     const penetration = ground.position.y - boardBounds.min.y;
     if (penetration <= 0) return false;
@@ -1041,6 +1054,7 @@ export function createArenaScene(canvas) {
       }
     }
 
+    breakout.groundContactCount = contactCount;
     return contactCount > 0;
   }
 
@@ -1147,11 +1161,17 @@ export function createArenaScene(canvas) {
 
   function simulateBreakoutStep(delta) {
     const { board, velocity, spin, dominoChain } = breakout;
+    breakout.elapsed += delta;
     updateLauncher(delta);
     if (breakout.sleeping) {
-      dominoChain?.update(delta, board);
-      updateDominoSequence();
-      return false;
+      boardBounds.setFromObject(board);
+      if (boardBounds.min.y <= ground.position.y + 0.02) {
+        dominoChain?.update(delta, board);
+        updateDominoSequence();
+        return false;
+      }
+      breakout.sleeping = false;
+      breakout.groundRestTime = 0;
     }
 
     velocity.y -= BOARD_GRAVITY * delta;
@@ -1172,7 +1192,8 @@ export function createArenaScene(canvas) {
     const nearlyStill = velocity.lengthSq() < GROUND_SLEEP_SPEED ** 2
       && spin.lengthSq() < GROUND_SLEEP_SPIN ** 2;
 
-    if (grounded && nearlyStill) {
+    // A single resting corner must not freeze the board before it tips onto a face.
+    if (grounded && breakout.groundContactCount >= 3 && nearlyStill) {
       breakout.groundRestTime += delta;
       if (breakout.groundRestTime >= GROUND_SLEEP_DELAY) {
         velocity.set(0, 0, 0);
@@ -1222,19 +1243,25 @@ export function createArenaScene(canvas) {
     }
   }
 
-  function updateSideFrame() {
+  function updateSideFrame(reveal = 1) {
     const { board, rock, launcher, dominoChain } = breakout;
     dominoChain.getCameraBounds(dominoBounds);
-    if (dominoChain.lastStarted) {
-      boardBounds.setFromObject(board);
-      dominoBounds.union(boardBounds);
-      rockBounds.setFromObject(rock);
-      dominoBounds.union(rockBounds);
-      if (launcher) {
-        launcherBounds.setFromObject(launcher.mesh);
-        dominoBounds.union(launcherBounds);
-      }
+    boardBounds.setFromObject(board);
+    dominoBounds.union(boardBounds);
+    rockBounds.setFromObject(rock);
+    dominoBounds.union(rockBounds);
+    if (launcher) {
+      launcherBounds.setFromObject(launcher.mesh);
+      dominoBounds.union(launcherBounds);
     }
+    if (breakout.phase === 'secondFlight' && !breakout.sleeping) {
+      cameraFocus.copy(breakout.velocity).multiplyScalar(CAMERA_LOOK_AHEAD);
+      cameraFocus.y -= BOARD_GRAVITY * CAMERA_LOOK_AHEAD ** 2 / 2;
+      futureBoardBounds.copy(boardBounds).translate(cameraFocus);
+      dominoBounds.union(futureBoardBounds);
+    }
+    dominoBounds.min.lerp(boardBounds.min, 1 - reveal);
+    dominoBounds.max.lerp(boardBounds.max, 1 - reveal);
     return dominoBounds.getCenter(dominoCenter);
   }
 
@@ -1257,9 +1284,9 @@ export function createArenaScene(canvas) {
     }
 
     return Math.min(
-      0.55,
-      frameWidth / (halfWidth * 2 + 4),
-      frameHeight / (halfHeight * 2 + 4),
+      1.1,
+      frameWidth / (halfWidth * 2 + 1.2),
+      frameHeight / (halfHeight * 2 + 1.2),
     ) * SIDE_CAMERA_ZOOM_FACTOR;
   }
 
@@ -1267,7 +1294,8 @@ export function createArenaScene(canvas) {
     const { dominoChain } = breakout;
     chainDirection.set(0, 0, 1).applyQuaternion(dominoChain.group.quaternion);
     sideDirection.set(-chainDirection.z, 0, chainDirection.x);
-    if (sideDirection.x * activeCameraOffset.x + sideDirection.z * activeCameraOffset.z < 0) {
+    cameraFocus.subVectors(dominoChain.group.position, breakout.rock.position);
+    if (sideDirection.dot(cameraFocus) < 0) {
       sideDirection.negate();
     }
     sideCameraOffset.set(
@@ -1276,8 +1304,6 @@ export function createArenaScene(canvas) {
       sideDirection.z * SIDE_CAMERA_DISTANCE * Math.cos(SIDE_CAMERA_ELEVATION),
     );
 
-    const toTarget = updateSideFrame().clone();
-    const toZoom = getSideFrameZoom(toTarget, sideCameraOffset);
     const fromSpherical = new THREE.Spherical().setFromVector3(activeCameraOffset);
     const toSpherical = new THREE.Spherical().setFromVector3(sideCameraOffset);
     const thetaDelta = THREE.MathUtils.euclideanModulo(
@@ -1286,9 +1312,6 @@ export function createArenaScene(canvas) {
     ) - Math.PI;
     sideCameraMove = {
       elapsed: 0,
-      fromTarget: cameraTarget.clone(),
-      toTarget,
-      toZoom,
       fromZoom: camera.zoom,
       fromSpherical,
       toSpherical,
@@ -1315,36 +1338,54 @@ export function createArenaScene(canvas) {
     );
     move.currentSpherical.theta = move.fromSpherical.theta + move.thetaDelta * eased;
     activeCameraOffset.setFromSpherical(move.currentSpherical);
-    cameraTarget.lerpVectors(move.fromTarget, move.toTarget, eased);
-    camera.zoom = THREE.MathUtils.lerp(move.fromZoom, move.toZoom, eased);
-    camera.updateProjectionMatrix();
+    updateSideFollowCamera(delta, eased);
   }
 
-  function updateSideFollowCamera(delta) {
+  function updateSideFollowCamera(delta, reveal = 1) {
     const { dominoChain } = breakout;
-    const frameTarget = updateSideFrame();
-    const frameZoom = getSideFrameZoom(frameTarget, sideCameraOffset);
-    const blend = 1 - Math.exp(-delta * 4);
-    const nextZoom = THREE.MathUtils.lerp(camera.zoom, frameZoom, blend);
+    const frameTarget = updateSideFrame(reveal);
+    const blend = 1 - Math.exp(-delta * CAMERA_FOLLOW_RATE);
     cameraTarget.lerp(frameTarget, blend);
-    activeCameraOffset.copy(sideCameraOffset);
-    camera.zoom = dominoChain.lastStarted ? Math.min(camera.zoom, nextZoom) : nextZoom;
+    const fitZoom = getSideFrameZoom(cameraTarget, activeCameraOffset);
+    let frameSize = 1 / fitZoom;
+    if (!dominoChain.started) {
+      const approachSize = THREE.MathUtils.lerp(
+        1 / sideCameraMove.fromZoom,
+        1 / Math.min(sideCameraMove.fromZoom, CAMERA_APPROACH_ZOOM),
+        reveal,
+      );
+      const closeup = THREE.MathUtils.smoothstep(
+        breakout.elapsed,
+        breakout.landingTime - 0.5,
+        breakout.landingTime - 0.2,
+      );
+      frameSize = THREE.MathUtils.lerp(approachSize, frameSize, closeup);
+    }
+    const zoomRate = frameSize < 1 / camera.zoom ? CAMERA_CLOSEUP_RATE : CAMERA_ZOOM_RATE;
+    const nextSize = THREE.MathUtils.damp(
+      1 / camera.zoom,
+      dominoChain.started ? Math.max(1 / camera.zoom, frameSize) : frameSize,
+      zoomRate,
+      delta,
+    );
+    camera.zoom = Math.min(1 / nextSize, fitZoom / SIDE_CAMERA_ZOOM_FACTOR);
     camera.updateProjectionMatrix();
   }
 
   function updateCamera(delta) {
     if (!breakout) return;
     const { board, rock, hitRock, phase } = breakout;
-    const needsSideCamera = phase === 'sideView' || phase === 'eruption'
-      || phase === 'secondFlight' || phase === 'finished';
-    if (needsSideCamera && !sideCameraMove) startSideCamera();
-
-    const sideTransitioning = sideCameraMove && sideCameraMove.elapsed < SIDE_CAMERA_DURATION
-      && (phase === 'secondFlight' || phase === 'finished');
-    if (phase === 'sideView' || phase === 'eruption' || sideTransitioning) {
-      updateSideCamera(delta);
-    } else if (phase === 'secondFlight' || phase === 'finished') {
-      updateSideFollowCamera(delta);
+    // Complete the close view before the board can touch the first domino.
+    const sideCameraStart = Math.max(0.2, breakout.landingTime - SIDE_CAMERA_DURATION - 0.2);
+    const needsSideCamera = breakout.dominoChain
+      && (breakout.elapsed >= sideCameraStart || phase !== 'flight');
+    if (needsSideCamera) {
+      if (!sideCameraMove) startSideCamera();
+      if (sideCameraMove.elapsed < SIDE_CAMERA_DURATION) {
+        updateSideCamera(delta);
+      } else {
+        updateSideFollowCamera(delta);
+      }
     } else {
       const rockDistance = board.position.distanceTo(rock.position);
       const rockFocusWeight = hitRock ? 0.5 : THREE.MathUtils.clamp((16 - rockDistance) / 16, 0, 0.5);

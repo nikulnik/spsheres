@@ -185,6 +185,7 @@ export function createDominoChain(scene, { origin, direction, groundY, material 
   let previousHeight = 0;
   let started = false;
   let complete = false;
+  let cameraExtent = 2;
 
   for (let index = 0; index < count; index += 1) {
     const scale = scaleFactor ** index;
@@ -262,17 +263,17 @@ export function createDominoChain(scene, { origin, direction, groundY, material 
       return target.copy(finalLocalBounds).applyMatrix4(group.matrixWorld);
     },
     getCameraBounds(target) {
-      if (last.angle > 0) return target.setFromObject(group);
-
-      let activeIndex = 0;
-      for (let index = 1; index < count - 1; index += 1) {
-        if (dominoes[index].angle > 0) activeIndex = index;
-      }
-      const firstIndex = Math.max(0, activeIndex - 1);
-      const lastIndex = Math.min(count - 2, activeIndex + 2);
-      target.setFromObject(dominoes[firstIndex].mesh);
-      for (let index = firstIndex + 1; index <= lastIndex; index += 1) {
+      const lastIndex = Math.min(count - 1, Math.floor(cameraExtent));
+      target.setFromObject(dominoes[0].mesh);
+      for (let index = 1; index <= lastIndex; index += 1) {
         target.union(cameraBounds.setFromObject(dominoes[index].mesh));
+      }
+      if (lastIndex < count - 1) {
+        // Reveal the next domino gradually instead of adding its whole bounds at once.
+        cameraBounds.setFromObject(dominoes[lastIndex + 1].mesh).union(target);
+        const fraction = cameraExtent - lastIndex;
+        target.min.lerp(cameraBounds.min, fraction);
+        target.max.lerp(cameraBounds.max, fraction);
       }
       return target;
     },
@@ -327,6 +328,16 @@ export function createDominoChain(scene, { origin, direction, groundY, material 
         domino.pivot.position.z = domino.pivotZ;
         domino.pivot.rotation.x = domino.angle;
       }
+      let activeIndex = 0;
+      for (let index = 1; index < count; index += 1) {
+        if (dominoes[index].angle > 0) activeIndex = index;
+      }
+      cameraExtent = THREE.MathUtils.damp(
+        cameraExtent,
+        Math.min(count - 1, activeIndex + 2),
+        3,
+        delta,
+      );
       group.updateMatrixWorld(true);
       if (last.angle >= FALLEN_ANGLE) complete = true;
     },
