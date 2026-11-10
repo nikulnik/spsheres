@@ -18,9 +18,7 @@ impactPlank_medium_001.ogg
 impactPlank_medium_002.ogg
 
 Board breakout:
-wood-break.ogg — "Punchy bright wood breaking", rubberduck, CC0 1.0.
-https://soundinator.net/s/wood-breaking-c8dfd6
-Original pack: "100 CC0 metal and wood SFX".
-https://opengameart.org/content/100-cc0-metal-and-wood-sfx
-Downloaded MP3: https://cdn.soundinator.net/sounds/im8b88c8dfd6.mp3
-Transcoded to OGG Vorbis without changing the sound.
+plank-break.ogg — "Wood Break.wav", Deathscyp, CC0 1.0.
+https://freesound.org/people/Deathscyp/sounds/443293/
+Downloaded high-quality MP3 preview: https://cdn.freesound.org/previews/443/443293_5701973-hq.mp3
+Transcoded to OGG Vorbis without otherwise changing the sound.

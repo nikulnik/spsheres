@@ -9,7 +9,7 @@ const SOUND_FILES = Object.freeze({
     'impactPlank_medium_001.ogg',
     'impactPlank_medium_002.ogg',
   ],
-  breakout: ['wood-break.ogg'],
+  breakout: ['plank-break.ogg'],
 });
 
 const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07, breakout: 0 });
