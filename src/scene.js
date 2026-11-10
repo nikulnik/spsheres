@@ -962,6 +962,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
         direction,
         groundY: ground.position.y,
         material: woodMaterials[1],
+        environment,
         onCollision,
       });
     }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { OBB } from 'three/addons/math/OBB.js';
+import { createLiquidBall } from './liquid.js';
 
 export const DOMINO_CONFIG = Object.freeze({
   count: 12,
@@ -170,7 +171,7 @@ function resolveContact(first, second, contact) {
   return impactImpulse;
 }
 
-export function createDominoChain(scene, { origin, direction, groundY, material, onCollision }) {
+export function createDominoChain(scene, { origin, direction, groundY, material, environment, onCollision }) {
   const { count, scaleFactor, width, height, depth, spacingRatio } = DOMINO_CONFIG;
   const group = new THREE.Group();
   const chainDirection = direction.clone().setY(0).normalize();
@@ -236,6 +237,7 @@ export function createDominoChain(scene, { origin, direction, groundY, material,
 
   group.updateMatrixWorld(true);
   const last = dominoes[count - 1];
+  const liquidBall = createLiquidBall(group, { domino: last, dominoes, environment });
   const finalLocalBounds = new THREE.Box3(
     new THREE.Vector3(-width * last.scale / 2, 0, -depth / 2),
     new THREE.Vector3(
@@ -251,10 +253,12 @@ export function createDominoChain(scene, { origin, direction, groundY, material,
   }
 
   const cameraBounds = new THREE.Box3();
+  const liquidBounds = new THREE.Box3();
 
   return {
     group,
     dominoes,
+    liquidBall,
     get started() {
       return started;
     },
@@ -266,7 +270,8 @@ export function createDominoChain(scene, { origin, direction, groundY, material,
     },
     getFinalBounds(target) {
       group.updateWorldMatrix(true, false);
-      return target.copy(finalLocalBounds).applyMatrix4(group.matrixWorld);
+      target.copy(finalLocalBounds).applyMatrix4(group.matrixWorld);
+      return target.union(liquidBall.getBounds(liquidBounds));
     },
     getCameraBounds(target) {
       const lastIndex = Math.min(count - 1, Math.floor(cameraExtent));
@@ -276,10 +281,16 @@ export function createDominoChain(scene, { origin, direction, groundY, material,
       }
       if (lastIndex < count - 1) {
         // Reveal the next domino gradually instead of adding its whole bounds at once.
-        cameraBounds.setFromObject(dominoes[lastIndex + 1].mesh).union(target);
+        cameraBounds.setFromObject(dominoes[lastIndex + 1].mesh);
+        if (lastIndex + 1 === count - 1) {
+          cameraBounds.union(liquidBall.getBounds(liquidBounds));
+        }
+        cameraBounds.union(target);
         const fraction = cameraExtent - lastIndex;
         target.min.lerp(cameraBounds.min, fraction);
         target.max.lerp(cameraBounds.max, fraction);
+      } else {
+        target.union(liquidBall.getBounds(liquidBounds));
       }
       return target;
     },
@@ -356,6 +367,7 @@ export function createDominoChain(scene, { origin, direction, groundY, material,
         delta,
       );
       group.updateMatrixWorld(true);
+      liquidBall.update(delta);
       if (last.angle >= FALLEN_ANGLE && !complete) {
         complete = true;
         collisionPosition.set(0, 0, last.pivotZ + last.height / 2).applyMatrix4(group.matrixWorld);
