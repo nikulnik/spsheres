@@ -237,7 +237,7 @@ export function createDominoChain(scene, { origin, direction, groundY, material,
 
   group.updateMatrixWorld(true);
   const last = dominoes[count - 1];
-  const liquidBall = createLiquidBall(group, { domino: last, dominoes, environment });
+  const liquidBall = createLiquidBall(group, { domino: last, dominoes, environment, onCollision });
   const finalLocalBounds = new THREE.Box3(
     new THREE.Vector3(-width * last.scale / 2, 0, -depth / 2),
     new THREE.Vector3(

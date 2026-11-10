@@ -32,3 +32,11 @@ plank-rock.ogg — layered "bfh1_wood_hit_02.ogg" and "bfh1_rock_hit_01.ogg" by 
 Source: https://opengameart.org/content/75-cc0-breaking-falling-hit-sfx
 Download: https://opengameart.org/sites/default/files/sfx_breaking_and_falling.zip
 The wood and rock hits were mixed at 0.6 and 0.75 gain, peak-limited, and transcoded to OGG Vorbis.
+
+Pink liquid bubble burst
+
+liquid-burst.ogg — layered "bubble bursting" by florianreichelt and "Water Splash 1" by qubodup, both CC0 1.0.
+https://freesound.org/people/florianreichelt/sounds/683097/
+https://freesound.org/people/qubodup/sounds/210428/
+The high-quality previews were trimmed and mixed so the pop leads into the sound of water splashing onto soil.
+The blend is filtered, faded, peak-limited, and encoded as mono OGG Vorbis.

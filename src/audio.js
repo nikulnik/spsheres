@@ -18,10 +18,13 @@ const SOUND_FILES = Object.freeze({
   ],
   breakout: ['plank-break.ogg'],
   rock: ['plank-rock.ogg'],
+  splash: ['liquid-burst.ogg'],
 });
 
-const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07, domino: 0, breakout: 0, rock: 0 });
-const SOUND_VOLUME = Object.freeze({ ball: 0.24, wall: 0.32, domino: 0.85, breakout: 0.9, rock: 0.9 });
+const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07 });
+const SOUND_VOLUME = Object.freeze({
+  ball: 0.24, wall: 0.32, domino: 0.85, breakout: 0.9, rock: 0.9, splash: 0.95,
+});
 const GLOBAL_PLAY_INTERVAL = 0.02;
 const MAX_VOICES = 12;
 const MASTER_VOLUME = 0.7;
@@ -34,9 +37,10 @@ const DOMINO_FIRST_VOLUME = 0.5;
 const DOMINO_LAST_VOLUME = 1.25;
 
 export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}) {
-  const buffers = { ball: [], wall: [], domino: [], breakout: [], rock: [] };
-  const nextVariant = { ball: 0, wall: 0, domino: 0, breakout: 0, rock: 0 };
-  const lastKindTime = { ball: -Infinity, wall: -Infinity, domino: -Infinity, breakout: -Infinity, rock: -Infinity };
+  const kinds = Object.keys(SOUND_FILES);
+  const buffers = {};
+  const nextVariant = Object.fromEntries(kinds.map((kind) => [kind, 0]));
+  const lastKindTime = Object.fromEntries(kinds.map((kind) => [kind, -Infinity]));
   let context;
   let master;
   let dominoMaster;
@@ -192,9 +196,11 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
     const samples = buffers[type];
     const isBoardImpact = type === 'breakout' || type === 'rock';
     const isDomino = type === 'domino';
-    const bypassesLimits = isBoardImpact || isDomino;
+    const isSplash = type === 'splash';
+    const useDominoMaster = isDomino || isSplash;
+    const bypassesLimits = isBoardImpact || useDominoMaster;
     if (
-      (!isDomino && distanceLevel === 0)
+      (!useDominoMaster && distanceLevel === 0)
       || !context
       || context.state !== 'running'
       || !samples?.length
@@ -222,7 +228,7 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
       source.playbackRate.value = DOMINO_FIRST_PLAYBACK_RATE
         * (DOMINO_LAST_PLAYBACK_RATE / DOMINO_FIRST_PLAYBACK_RATE) ** dominoProgress;
     } else {
-      source.playbackRate.value = isBoardImpact ? 1 : 0.96 + strength * 0.08;
+      source.playbackRate.value = isBoardImpact || isSplash ? 1 : 0.96 + strength * 0.08;
     }
 
     const volumeScale = isDomino
@@ -235,7 +241,7 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
 
     source.connect(gain);
     gain.connect(panner);
-    panner.connect(isDomino ? dominoMaster : master);
+    panner.connect(useDominoMaster ? dominoMaster : master);
     activeVoices += 1;
     source.onended = () => {
       activeVoices -= 1;

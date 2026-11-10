@@ -1,0 +1,7 @@
+These four GLB files are unchanged copies of the cup models from the RPG project.
+Paths are relative to the RPG repository root.
+
+assets/models/tea_cup.glb
+assets/models/ribbed_cup.glb
+assets/models/strawberry_cup.glb
+assets/models/rose_cup.glb

@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { OBB } from 'three/addons/math/OBB.js';
 import { createBallSystem } from './balls.js';
 import { createDominoChain, getFirstDominoOrigin } from './dominoes.js';
+import { addDominoCups, loadDominoCups } from './cups.js';
 
 export const SCENE_CONFIG = Object.freeze({
   frameWidth: 9,
@@ -806,6 +807,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
   const environment = pmremGenerator.fromScene(environmentScene, 0.04).texture;
   environmentScene.dispose();
   pmremGenerator.dispose();
+  const cupsReady = loadDominoCups(environment);
 
   const ROCK_RADIUS = 2.5;
   const ROCK_DISTANCE = 44;
@@ -848,7 +850,6 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
   const activeCameraOffset = cameraOffset.clone();
   const sideCameraOffset = new THREE.Vector3();
   const boardLongAxis = new THREE.Vector3();
-  const chainDirection = new THREE.Vector3();
   const sideDirection = new THREE.Vector3();
   const launchDirection = new THREE.Vector3();
   const boardBounds = new THREE.Box3();
@@ -957,7 +958,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     if (landing) {
       breakout.landingTime = landing.time;
       const origin = getFirstDominoOrigin(landing.board, direction, ground.position.y);
-      breakout.dominoChain = createDominoChain(scene, {
+      const dominoChain = createDominoChain(scene, {
         origin,
         direction,
         groundY: ground.position.y,
@@ -965,6 +966,12 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
         environment,
         onCollision,
       });
+      breakout.dominoChain = dominoChain;
+      sideDirection.set(-direction.z, 0, direction.x);
+      cameraFocus.subVectors(dominoChain.group.position, rock.position);
+      const farSide = sideDirection.dot(cameraFocus) < 0 ? -1 : 1;
+      sideDirection.multiplyScalar(farSide);
+      cupsReady.then((cups) => addDominoCups(dominoChain, cups, farSide));
     }
   }
 
@@ -1371,13 +1378,6 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
   }
 
   function startSideCamera() {
-    const { dominoChain } = breakout;
-    chainDirection.set(0, 0, 1).applyQuaternion(dominoChain.group.quaternion);
-    sideDirection.set(-chainDirection.z, 0, chainDirection.x);
-    cameraFocus.subVectors(dominoChain.group.position, breakout.rock.position);
-    if (sideDirection.dot(cameraFocus) < 0) {
-      sideDirection.negate();
-    }
     sideCameraOffset.set(
       sideDirection.x * SIDE_CAMERA_DISTANCE * Math.cos(SIDE_CAMERA_ELEVATION),
       SIDE_CAMERA_DISTANCE * Math.sin(SIDE_CAMERA_ELEVATION),
@@ -1512,7 +1512,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
   return {
     camera,
     courtDepth,
-    ready: Promise.all([woodReady, groundReady]),
+    ready: Promise.all([woodReady, groundReady, cupsReady]),
     render: () => renderer.render(scene, camera),
     resize: (width, height, pixelRatio) => {
       renderer.setPixelRatio(pixelRatio);

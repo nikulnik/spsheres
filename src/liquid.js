@@ -13,7 +13,10 @@ const GROUND_FILM_Y = 0.028;
 const RIM_DRAG = 0.75;
 const DOMINO_RESTITUTION = 0.04;
 const DOMINO_TANGENT_RETENTION = 0.68;
-const SPLASH_EXTENT = 5.15;
+const SPLASH_RANGE_SCALE = 1.45;
+const SPLASH_SIDE_EXTENT = 6.75;
+const SPLASH_BACK_EXTENT = 3.6;
+const SPLASH_FORWARD_EXTENT = 5.55;
 const SPLASH_HEIGHT = 2.55;
 const TAU = 2 * Math.PI;
 const { clamp, lerp, smoothstep } = THREE.MathUtils;
@@ -67,7 +70,7 @@ function createSplatGeometry() {
   return geometry;
 }
 
-export function createLiquidBall(parent, { domino, dominoes = [domino], environment }) {
+export function createLiquidBall(parent, { domino, dominoes = [domino], environment, onCollision }) {
   const radius = domino.height * 0.15;
   const center = new THREE.Vector3(0, radius + 0.025, domino.pivotZ + domino.height * 0.68);
   const gravity = radius * 5;
@@ -224,11 +227,11 @@ export function createLiquidBall(parent, { domino, dominoes = [domino], environm
     new THREE.Vector3(center.x + radius * 1.1, radius * 2.1, center.z + radius * 1.1),
   );
   const splashBounds = new THREE.Box3(
-    new THREE.Vector3(center.x - radius * SPLASH_EXTENT, 0, center.z - radius * SPLASH_EXTENT),
+    new THREE.Vector3(center.x - radius * SPLASH_SIDE_EXTENT, 0, center.z - radius * SPLASH_BACK_EXTENT),
     new THREE.Vector3(
-      center.x + radius * SPLASH_EXTENT,
+      center.x + radius * SPLASH_SIDE_EXTENT,
       radius * SPLASH_HEIGHT,
-      center.z + radius * SPLASH_EXTENT,
+      center.z + radius * SPLASH_FORWARD_EXTENT,
     ),
   );
   let burst = false;
@@ -290,7 +293,8 @@ export function createLiquidBall(parent, { domino, dominoes = [domino], environm
       crest,
       wave,
       exposure,
-      radialSpeed: radius * impulse * (1.15 + 1.63 * sideways + 1.6 * forward + 1.45 * crest),
+      radialSpeed: radius * impulse * SPLASH_RANGE_SCALE
+        * (1.15 + 1.63 * sideways + 1.6 * forward + 1.45 * crest),
       liftSpeed: radius * impulse * (0.68 + 0.78 * sideways + 0.5 * forward + 1.6 * crest),
       baseHeight: radius * (0.26 + 0.21 * exposure + 0.13 * crest),
       puddleShape: 0.74 + 0.21 * forward + 0.18 * sideways + 0.12 * crest + 0.07 * wave,
@@ -513,6 +517,10 @@ export function createLiquidBall(parent, { domino, dominoes = [domino], environm
     impulse = clamp(0.82 - impactVelocity.y / radius * 0.085, 0.8, 1.2);
     fallDirection = Math.sign(impactVelocity.z) || 1;
     splashOrigin.z = lerp(center.z, point.z, 0.3);
+    if (onCollision) {
+      const { x, z } = parent.localToWorld(point.clone());
+      onCollision({ type: 'splash', intensity: Math.min(1, impulse), x, z });
+    }
 
     const jetCount = 9;
     for (let index = 0; index < jetCount; index += 1) {
