@@ -356,7 +356,17 @@ export function createDominoChain(scene, { origin, direction, groundY, material,
         delta,
       );
       group.updateMatrixWorld(true);
-      if (last.angle >= FALLEN_ANGLE) complete = true;
+      if (last.angle >= FALLEN_ANGLE && !complete) {
+        complete = true;
+        collisionPosition.set(0, 0, last.pivotZ + last.height / 2).applyMatrix4(group.matrixWorld);
+        onCollision?.({
+          type: 'finalDomino',
+          index: count - 1,
+          intensity: 1,
+          x: collisionPosition.x,
+          z: collisionPosition.z,
+        });
+      }
     },
   };
 }
