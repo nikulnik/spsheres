@@ -1,0 +1,18 @@
+Kenney Impact Sounds
+Author: Kenney
+Source: https://kenney.nl/assets/impact-sounds
+License: CC0 1.0 Universal (public domain)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Downloaded from this mirror of the original OGG files:
+https://github.com/latent-spaces/brag/tree/main/skills/brag/assets/sfx/impact
+
+Ball-ball collisions:
+impactGlass_light_001.ogg
+impactGlass_light_002.ogg
+impactGlass_light_003.ogg
+
+Ball-border collisions:
+impactPlank_medium_000.ogg
+impactPlank_medium_001.ogg
+impactPlank_medium_002.ogg

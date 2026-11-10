@@ -24,7 +24,7 @@ const BALL_COLORS = [
   { color: '#ffd166', emissive: '#463608' },
 ];
 
-export function createBallSystem(scene, { frameWidth, courtDepth, environment, onBreakout }) {
+export function createBallSystem(scene, { frameWidth, courtDepth, environment, onBreakout, onCollision }) {
   const { radius, speed, splitAngle, splitCooldown } = BALL_CONFIG;
   const xLimit = frameWidth / 2 - 0.26 - radius;
   const zLimit = courtDepth / 2 - 0.26 - radius;
@@ -126,6 +126,12 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment, o
     normalX /= normalLength;
     normalZ /= normalLength;
     const dot = ball.velocity.x * normalX + ball.velocity.y * normalZ;
+    onCollision?.({
+      type: 'wall',
+      intensity: Math.min(1, -dot / speed),
+      x: position.x,
+      z: position.z,
+    });
 
     return {
       side,
@@ -185,6 +191,12 @@ export function createBallSystem(scene, { frameWidth, courtDepth, environment, o
           first.velocity.y -= impulse * normalZ;
           second.velocity.x += impulse * normalX;
           second.velocity.y += impulse * normalZ;
+          onCollision?.({
+            type: 'ball',
+            intensity: Math.min(1, -normalVelocity / (speed * 2)),
+            x: (first.mesh.position.x + second.mesh.position.x) / 2,
+            z: (first.mesh.position.z + second.mesh.position.z) / 2,
+          });
         }
       }
 

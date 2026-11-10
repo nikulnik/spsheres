@@ -1,5 +1,6 @@
 import './style.css';
-import { createArenaScene } from './scene.js';
+import { createCollisionAudio } from './audio.js';
+import { createArenaScene, SCENE_CONFIG } from './scene.js';
 
 const RECORD_WIDTH = 1080;
 const RECORD_HEIGHT = 1920;
@@ -12,7 +13,18 @@ const recordLabel = document.querySelector('#record-label');
 const status = document.querySelector('#status');
 const timer = document.querySelector('#timer');
 
-const arena = createArenaScene(canvas);
+const collisionAudio = createCollisionAudio({
+  panRange: SCENE_CONFIG.frameWidth / 2,
+  initialZoom: SCENE_CONFIG.cameraZoom,
+});
+const arena = createArenaScene(canvas, {
+  onCollision: collisionAudio.play,
+  onCameraZoom: collisionAudio.setCameraZoom,
+});
+const unlockAudio = () => collisionAudio.unlock();
+window.addEventListener('pointerdown', unlockAudio, { passive: true });
+window.addEventListener('keydown', unlockAudio);
+
 let capturing = false;
 let recorder;
 let stream;
@@ -84,13 +96,14 @@ function startRecording() {
   try {
     capturing = true;
     arena.resize(RECORD_WIDTH, RECORD_HEIGHT, 1);
+    collisionAudio.unlock();
     stream = canvas.captureStream(RECORD_FPS);
+    collisionAudio.addToStream(stream);
 
-    const mimeType = [
-      'video/webm;codecs=vp9',
-      'video/webm;codecs=vp8',
-      'video/webm',
-    ].find((type) => MediaRecorder.isTypeSupported(type));
+    const mimeTypes = stream.getAudioTracks().length > 0
+      ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+      : ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+    const mimeType = mimeTypes.find((type) => MediaRecorder.isTypeSupported(type));
     const options = { videoBitsPerSecond: 12_000_000 };
     if (mimeType) options.mimeType = mimeType;
 

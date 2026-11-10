@@ -677,7 +677,7 @@ function addRail(group, geometry, material, x, y, z) {
   return rail;
 }
 
-export function createArenaScene(canvas) {
+export function createArenaScene(canvas, { onCollision, onCameraZoom } = {}) {
   const { frameWidth, frameHeight, courtHeightInFrame, cameraElevation, cameraZoom } = SCENE_CONFIG;
   const elevation = THREE.MathUtils.degToRad(cameraElevation);
   const sinElevation = Math.sin(elevation);
@@ -1493,6 +1493,7 @@ export function createArenaScene(canvas) {
     courtDepth,
     environment,
     onBreakout: releaseBoard,
+    onCollision,
   });
 
   return {
@@ -1511,6 +1512,7 @@ export function createArenaScene(canvas) {
       ballSystem.update(delta);
       updateBreakout(delta);
       updateCamera(delta);
+      onCameraZoom?.(camera.zoom);
       renderer.shadowMap.needsUpdate = true;
       renderer.render(scene, camera);
     }),
