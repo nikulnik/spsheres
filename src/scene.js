@@ -18,6 +18,13 @@ const PLANK_HEIGHT = 0.2;
 const PLANK_GAP = 0.03;
 const PLANK_COUNT = 3;
 const RAIL_HEIGHT = PLANK_HEIGHT * PLANK_COUNT + PLANK_GAP * (PLANK_COUNT - 1);
+const GROUND_SIZE = 1000;
+const GROUND_Y = -0.1;
+const GROUND_PATCH_SIZE = GROUND_SIZE;
+const GROUND_GRASS_TILE_SIZE = 2.8;
+const GROUND_SOIL_TILE_SIZE = 1.3;
+const GROUND_INITIAL_GRASS_MARGIN = 2;
+const GROUND_INITIAL_GRASS_BLEND = 6;
 
 function seededRandom(initialSeed = 47) {
   let seed = initialSeed;
@@ -172,100 +179,158 @@ function createWrappingNoise(size, layers, random) {
   return values;
 }
 
-function paintGrassBlade(data, size, x, y, tall, random) {
-  const kind = random();
-  const tone = random();
-  let red = 60 + 46 * tone;
-  let green = 92 + 50 * tone;
-  let blue = 32 + 16 * tone;
-  if (kind < 0.04) {
-    red = 166;
-    green = 154;
-    blue = 94;
-  } else if (kind < 0.2) {
-    red = 128;
-    green = 156;
-    blue = 56;
-  }
-
-  const shaded = 0.55 + 0.55 * tall;
-  const steps = Math.ceil(5 + 15 * (0.35 + 0.65 * tall) * (0.6 + 0.4 * random()));
-  const angle = -Math.PI / 2 + (random() - 0.5) * 1.5;
-  let directionX = Math.cos(angle);
-  let directionY = Math.sin(angle);
-  const curl = (random() - 0.5) * 0.1;
-  const cosine = Math.cos(curl);
-  const sine = Math.sin(curl);
-  const thick = random() < 0.5 ? steps / 2 : 0;
-  let light = shaded * 0.72;
-  const lighter = (shaded * 0.48) / steps;
-  const mask = size - 1;
-
-  for (let step = 0; step <= steps; step += 1) {
-    const row = (((y + size + 0.5) | 0) & mask) * size;
-    const column = ((x + size + 0.5) | 0) & mask;
-    let index = (row + column) * 4;
-    data[index] = red * light;
-    data[index + 1] = green * light;
-    data[index + 2] = blue * light;
-    if (step < thick) {
-      index = (row + ((column + 1) & mask)) * 4;
-      data[index] = red * light * 0.9;
-      data[index + 1] = green * light * 0.9;
-      data[index + 2] = blue * light * 0.9;
-    }
-    light += lighter;
-    x += directionX;
-    y += directionY;
-    const turned = directionX * cosine - directionY * sine;
-    directionY = directionX * sine + directionY * cosine;
-    directionX = turned;
-  }
+function createGroundTexture(renderer, loader, surface, kind) {
+  const texture = loader.load(`/textures/ground/${surface}/${kind}.jpg`);
+  if (kind === 'color') texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+  texture.repeat.set(GROUND_SIZE / GROUND_GRASS_TILE_SIZE, GROUND_SIZE / GROUND_GRASS_TILE_SIZE);
+  return texture;
 }
 
-function createGroundTexture(renderer) {
-  const size = 512;
-  const data = new Uint8ClampedArray(size * size * 4);
-  data.set([40, 46, 24, 255]);
-  for (let done = 4; done < data.length; done *= 2) {
-    data.copyWithin(done, 0, Math.min(done, data.length - done));
-  }
+function createGroundVariationTexture(renderer) {
+  const size = 2048;
+  const random = seededRandom(219);
+  const broad = createWrappingNoise(size, [[12, 1], [28, 0.55], [61, 0.25]], random);
+  const patches = createWrappingNoise(size, [[33, 1], [79, 0.45], [197, 0.2]], random);
+  const detail = createWrappingNoise(size, [[367, 1], [761, 0.5]], random);
+  const data = new Uint8Array(size * size * 4);
 
-  let state = 1;
-  const random = () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-  const coarse = size / 4;
-  const tufts = createWrappingNoise(coarse, [[16, 1], [40, 0.7]], random);
-  const bladeCount = 26000;
-
-  for (let blade = 0; blade < bladeCount; blade += 1) {
-    const tall = (blade + random()) / bladeCount;
-    for (;;) {
-      const x = random() * size;
-      const y = random() * size;
-      const tuft = tufts[(y >> 2) * coarse + (x >> 2)];
-      if (random() > 0.2 + 0.8 * tuft) continue;
-      paintGrassBlade(data, size, x, y, tall, random);
-      break;
-    }
+  for (let index = 0; index < broad.length; index += 1) {
+    const coverage = patches[index] * 0.85 + broad[index] * 0.15 + (detail[index] - 0.5) * 0.12;
+    const soil = THREE.MathUtils.smoothstep(coverage, 0.47, 0.71);
+    const dry = THREE.MathUtils.smoothstep(broad[index] * 0.45 + detail[index] * 0.55, 0.38, 0.69);
+    // Pack soil coverage, dry grass, broad shading and soil detail at landscape scale.
+    data[index * 4] = soil * 255;
+    data[index * 4 + 1] = dry * 255;
+    data[index * 4 + 2] = broad[index] * 255;
+    data[index * 4 + 3] = detail[index] * 255;
   }
 
   const texture = new THREE.DataTexture(data, size, size);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.generateMipmaps = true;
   texture.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy());
-  texture.repeat.set(1000 / 2.3, 1000 / 2.3);
   texture.needsUpdate = true;
   return texture;
+}
+
+function createGroundMaterial(renderer, initialGroundView) {
+  const manager = new THREE.LoadingManager();
+  const ready = new Promise((resolve, reject) => {
+    manager.onLoad = resolve;
+    manager.onError = (url) => reject(new Error(`Texture loading failed: ${url}`));
+  });
+  const loader = new THREE.TextureLoader(manager);
+  const loadSurface = (surface, kinds) => Object.fromEntries(
+    kinds.map((kind) => [kind, createGroundTexture(renderer, loader, surface, kind)]),
+  );
+  const grass = loadSurface('grass', ['color', 'normal', 'roughness', 'ao']);
+  const soil = loadSurface('soil', ['color', 'normal', 'arm']);
+  const material = new THREE.MeshStandardMaterial({
+    map: grass.color,
+    normalMap: grass.normal,
+    roughnessMap: grass.roughness,
+    normalScale: new THREE.Vector2(0.5, 0.5),
+    roughness: 1,
+  });
+  const variationMap = createGroundVariationTexture(renderer);
+
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.groundVariationMap = { value: variationMap };
+    shader.uniforms.groundInitialGrassArea = { value: new THREE.Vector4(
+      0,
+      initialGroundView.centerZ,
+      initialGroundView.halfWidth + GROUND_INITIAL_GRASS_MARGIN,
+      initialGroundView.halfDepth + GROUND_INITIAL_GRASS_MARGIN,
+    ) };
+    shader.uniforms.groundGrassAoMap = { value: grass.ao };
+    shader.uniforms.groundSoilMap = { value: soil.color };
+    shader.uniforms.groundSoilNormalMap = { value: soil.normal };
+    shader.uniforms.groundSoilArmMap = { value: soil.arm };
+    // Linear-light averages of the bundled color maps for filtering distant detail.
+    shader.uniforms.groundGrassAverage = { value: new THREE.Color(0.126886, 0.161173, 0.034309) };
+    shader.uniforms.groundSoilAverage = { value: new THREE.Color(0.078995, 0.062239, 0.041362) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `
+        #include <common>
+        varying vec2 vGroundUv;
+      `)
+      .replace('#include <uv_vertex>', `
+        #include <uv_vertex>
+        vGroundUv = uv * ${(GROUND_SIZE / GROUND_PATCH_SIZE).toFixed(8)};
+      `);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `
+        #include <common>
+        uniform sampler2D groundVariationMap;
+        uniform vec4 groundInitialGrassArea;
+        uniform sampler2D groundGrassAoMap;
+        uniform sampler2D groundSoilMap;
+        uniform sampler2D groundSoilNormalMap;
+        uniform sampler2D groundSoilArmMap;
+        uniform vec3 groundGrassAverage;
+        uniform vec3 groundSoilAverage;
+        varying vec2 vGroundUv;
+      `)
+      .replace('#include <map_fragment>', `
+        vec4 groundSurface = texture2D(groundVariationMap, vGroundUv);
+        // Gently warp matching PBR maps to break up their repeated detail.
+        float groundWarpZ = texture2D(groundVariationMap, vGroundUv + vec2(0.37, 0.61)).b;
+        vec2 groundWarp = (vec2(groundSurface.b, groundWarpZ) - 0.5) * 2.4;
+        vec2 groundGrassUv = vMapUv + groundWarp;
+        vec2 groundSoilUv = vMapUv * ${(GROUND_GRASS_TILE_SIZE / GROUND_SOIL_TILE_SIZE).toFixed(8)} + groundWarp + vec2(0.37, 0.61);
+        vec2 groundSoilUv2 = groundSoilUv * 0.73 + vec2(17.1, 3.7);
+        float groundPixelSize = max(length(dFdx(vMapUv)), length(dFdy(vMapUv)));
+        float groundGrassFade = smoothstep(0.018, 0.09, groundPixelSize);
+        float groundSoilFade = smoothstep(0.025, 0.12, groundPixelSize * ${(GROUND_GRASS_TILE_SIZE / GROUND_SOIL_TILE_SIZE).toFixed(8)});
+        vec4 groundGrassArm = vec4(
+          texture2D(groundGrassAoMap, groundGrassUv).r,
+          texture2D(roughnessMap, groundGrassUv).g,
+          0.0, 1.0
+        );
+        vec4 groundSoilArm = mix(texture2D(groundSoilArmMap, groundSoilUv), texture2D(groundSoilArmMap, groundSoilUv2), 0.45);
+        // Let individual grass clumps break the edge of exposed soil.
+        float groundEdge = (0.6 - groundGrassArm.r) * 0.3 + (groundSoilArm.r - 0.65) * 0.12;
+        float groundEdgeWeight = 4.0 * groundSurface.r * (1.0 - groundSurface.r);
+        float groundSoilMask = clamp(groundSurface.r + groundEdge * groundEdgeWeight, 0.0, 1.0);
+        // Keep the starting view grassy in world space, including its frame corners.
+        vec2 groundWorldXZ = (vGroundUv * ${GROUND_PATCH_SIZE.toFixed(1)} - vec2(${(GROUND_SIZE / 2).toFixed(1)})) * vec2(1.0, -1.0);
+        vec2 groundOutsideGrass = max(abs(groundWorldXZ - groundInitialGrassArea.xy) - groundInitialGrassArea.zw, vec2(0.0));
+        groundSoilMask *= smoothstep(0.0, ${GROUND_INITIAL_GRASS_BLEND.toFixed(1)}, length(groundOutsideGrass));
+        vec3 groundGrassColor = texture2D(map, groundGrassUv).rgb;
+        vec3 groundSoilColor = mix(texture2D(groundSoilMap, groundSoilUv).rgb, texture2D(groundSoilMap, groundSoilUv2).rgb, 0.45);
+        groundGrassColor = mix(groundGrassColor, groundGrassAverage, groundGrassFade);
+        groundSoilColor = mix(groundSoilColor, groundSoilAverage, groundSoilFade);
+        vec3 groundGrassTint = mix(vec3(0.82, 1.0, 0.88), vec3(1.03, 0.98, 0.84), groundSurface.g);
+        groundGrassColor *= groundGrassTint * mix(0.62, 0.84, groundSurface.b);
+        groundSoilColor *= mix(0.86, 1.24, groundSurface.b) * mix(0.96, 1.04, groundSurface.a);
+        diffuseColor.rgb *= mix(groundGrassColor, groundSoilColor, groundSoilMask);
+      `)
+      .replace('#include <roughnessmap_fragment>', `
+        float roughnessFactor = clamp(mix(groundGrassArm.g, groundSoilArm.g, groundSoilMask), 0.76, 1.0);
+      `)
+      .replace('#include <normal_fragment_maps>', `
+        vec3 groundGrassNormal = texture2D(normalMap, groundGrassUv).xyz * 2.0 - 1.0;
+        vec3 groundSoilNormal = mix(texture2D(groundSoilNormalMap, groundSoilUv).xyz, texture2D(groundSoilNormalMap, groundSoilUv2).xyz, 0.45) * 2.0 - 1.0;
+        groundGrassNormal = mix(groundGrassNormal, vec3(0.0, 0.0, 1.0), groundGrassFade);
+        groundSoilNormal = mix(groundSoilNormal, vec3(0.0, 0.0, 1.0), groundSoilFade);
+        vec3 groundNormal = normalize(mix(groundGrassNormal, groundSoilNormal, groundSoilMask));
+        groundNormal.xy *= normalScale;
+        normal = normalize(tbn * groundNormal);
+      `)
+      .replace('#include <aomap_fragment>', `
+        #include <aomap_fragment>
+        float groundOcclusion = mix(groundGrassArm.r, groundSoilArm.r, groundSoilMask);
+        reflectedLight.indirectDiffuse *= mix(1.0, groundOcclusion, 0.45);
+      `);
+  };
+  material.customProgramCacheKey = () => 'ground-pbr-landscape-v3';
+  return { material, ready };
 }
 
 function createFloorTextures(renderer) {
@@ -651,12 +716,14 @@ export function createArenaScene(canvas) {
   camera.lookAt(target);
   camera.updateProjectionMatrix();
 
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(1000, 1000),
-    new THREE.MeshStandardMaterial({ map: createGroundTexture(renderer), roughness: 1 }),
-  );
+  const { material: groundMaterial, ready: groundReady } = createGroundMaterial(renderer, {
+    centerZ: targetZ + GROUND_Y * cosElevation / sinElevation,
+    halfWidth: frameWidth / (2 * cameraZoom),
+    halfDepth: frameHeight / (2 * cameraZoom * sinElevation),
+  });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE), groundMaterial);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.1;
+  ground.position.y = GROUND_Y;
   ground.receiveShadow = true;
   scene.add(ground);
 
@@ -1431,7 +1498,7 @@ export function createArenaScene(canvas) {
   return {
     camera,
     courtDepth,
-    ready: woodReady,
+    ready: Promise.all([woodReady, groundReady]),
     render: () => renderer.render(scene, camera),
     resize: (width, height, pixelRatio) => {
       renderer.setPixelRatio(pixelRatio);

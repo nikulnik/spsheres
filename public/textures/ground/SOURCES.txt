@@ -1,0 +1,25 @@
+Ground PBR textures, 1024 x 1024, original JPEG files.
+License for both assets: CC0 1.0 (public domain).
+https://polyhaven.com/license
+https://docs.ambientcg.com/license/
+https://creativecommons.org/publicdomain/zero/1.0/
+
+grass/ - Grass 004, ambientCG (Lennart Demes)
+https://ambientcg.com/view?id=Grass004
+https://ambientcg.com/get?file=Grass004_1K-JPG.zip
+Source files: Grass004_1K-JPG_Color.jpg, Grass004_1K-JPG_NormalGL.jpg,
+Grass004_1K-JPG_Roughness.jpg, Grass004_1K-JPG_AmbientOcclusion.jpg
+Physical tile width: 1.4 metres.
+
+soil/ - Brown Mud 02, Rob Tuytel
+https://polyhaven.com/a/brown_mud_02
+Source files: brown_mud_02_diff_1k.jpg, brown_mud_02_nor_gl_1k.jpg,
+brown_mud_02_arm_1k.jpg
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brown_mud_02/
+Physical tile width: 1.3 metres.
+
+color.jpg: diffuse color (sRGB).
+normal.jpg: tangent-space OpenGL normal map (linear).
+arm.jpg: ambient occlusion (R), roughness (G), metalness (B), linear.
+roughness.jpg: roughness, linear (grass only).
+ao.jpg: ambient occlusion, linear (grass only).
