@@ -180,77 +180,7 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
     source.start(now);
   }
 
-  function playFinalDomino(x) {
-    if (!context || context.state !== 'running') return;
-
-    const now = context.currentTime;
-
-    function routeVoice(source, ...nodes) {
-      const panner = context.createStereoPanner();
-      panner.pan.value = getPan(x);
-      let previous = source;
-      for (const node of nodes) {
-        previous.connect(node);
-        previous = node;
-      }
-      previous.connect(panner);
-      panner.connect(dominoMaster);
-      activeVoices += 1;
-      source.onended = () => {
-        activeVoices -= 1;
-        source.disconnect();
-        for (const node of nodes) node.disconnect();
-        panner.disconnect();
-      };
-    }
-
-    for (const tone of [
-      { start: 120, end: 34, sweep: 0.85, volume: 1.3, attack: 0.01, duration: 2.2 },
-      { start: 60, end: 24, sweep: 1.3, volume: 0.95, attack: 0.035, duration: 2.8 },
-    ]) {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(tone.start, now);
-      oscillator.frequency.exponentialRampToValueAtTime(tone.end, now + tone.sweep);
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(tone.volume, now + tone.attack);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.duration);
-      routeVoice(oscillator, gain);
-      oscillator.start(now);
-      oscillator.stop(now + tone.duration);
-    }
-
-    const noiseDuration = 0.85;
-    const noiseBuffer = context.createBuffer(1, Math.ceil(context.sampleRate * noiseDuration), context.sampleRate);
-    const noiseData = noiseBuffer.getChannelData(0);
-    let seed = 0x6d2b79f5;
-    for (let index = 0; index < noiseData.length; index += 1) {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      noiseData[index] = seed / 2147483648 - 1;
-    }
-    const noise = context.createBufferSource();
-    const filter = context.createBiquadFilter();
-    const noiseGain = context.createGain();
-    noise.buffer = noiseBuffer;
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(1600, now);
-    filter.frequency.exponentialRampToValueAtTime(110, now + 0.65);
-    filter.Q.value = 0.8;
-    noiseGain.gain.setValueAtTime(0.0001, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.7, now + 0.004);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDuration);
-    routeVoice(noise, filter, noiseGain);
-    noise.start(now);
-    noise.stop(now + noiseDuration);
-  }
-
   function play({ type, intensity, index = 0, x = 0 }) {
-    if (type === 'finalDomino') {
-      playFinalDomino(x);
-      return;
-    }
-
     const samples = buffers[type];
     const isBoardImpact = type === 'breakout' || type === 'rock';
     const isDomino = type === 'domino';

@@ -857,6 +857,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
   const launcherBounds = new THREE.Box3();
   const futureBoardBounds = new THREE.Box3();
   const dominoBounds = new THREE.Box3();
+  const cupBounds = new THREE.Box3();
   const dominoCenter = new THREE.Vector3();
   const dominoSize = new THREE.Vector3();
   const sideFrameForward = new THREE.Vector3();
@@ -882,6 +883,12 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
   const groundNormal = new THREE.Vector3(0, 1, 0);
   const groundContacts = Array.from({ length: 8 }, () => new THREE.Vector3());
   const sunlightOffset = sunlight.position.clone();
+  const sunlightDistance = sunlightOffset.length();
+  const shadowDepthProjection = new THREE.Vector3(
+    Math.abs(sunlightOffset.x),
+    Math.abs(sunlightOffset.y),
+    Math.abs(sunlightOffset.z),
+  ).multiplyScalar(0.5 / sunlightDistance);
   const rockGeometry = createRockGeometry(ROCK_RADIUS);
   const rockMaterial = new THREE.MeshStandardMaterial({
     ...createRockTextures(renderer),
@@ -1320,32 +1327,50 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
       breakoutAccumulator -= BOARD_PHYSICS_STEP;
     }
 
-    const { board, dominoChain, inFlight } = breakout;
+    const { board, dominoChain, cupExplosion, inFlight } = breakout;
     onBoardFlight?.(inFlight ? board.position.x : null);
-    const shadowCenter = dominoChain?.started
-      ? dominoChain.getFinalBounds(dominoBounds).getCenter(dominoCenter)
-      : board.position;
-    sunlight.target.position.copy(shadowCenter);
-    sunlight.position.copy(shadowCenter).add(sunlightOffset);
-    sunlight.target.updateMatrixWorld();
-
+    let shadowCenter = board.position;
+    let lightDistance = sunlightDistance;
     if (dominoChain?.started) {
+      const shadowCamera = sunlight.shadow.camera;
+      const includeDebris = dominoChain.liquidBall.burst && cupExplosion;
+      dominoChain.getFinalBounds(dominoBounds);
+      if (includeDebris) {
+        dominoBounds.union(cupExplosion.getBounds(cupBounds));
+      }
+      shadowCenter = dominoBounds.getCenter(dominoCenter);
       dominoBounds.getSize(dominoSize);
-      const shadowRadius = Math.max(11, Math.hypot(dominoSize.x, dominoSize.z) * 0.6);
-      if (shadowRadius > sunlight.shadow.camera.right) {
-        sunlight.shadow.camera.left = -shadowRadius;
-        sunlight.shadow.camera.right = shadowRadius;
-        sunlight.shadow.camera.top = shadowRadius;
-        sunlight.shadow.camera.bottom = -shadowRadius;
-        sunlight.shadow.camera.far = 140;
-        sunlight.shadow.camera.updateProjectionMatrix();
+
+      let shadowFar = 140;
+      if (includeDebris) {
+        // Keep the fragments between the shadow camera's near and far planes.
+        const halfDepth = dominoSize.dot(shadowDepthProjection);
+        const margin = 3;
+        lightDistance = Math.max(lightDistance, shadowCamera.near + halfDepth + margin);
+        shadowFar = Math.max(shadowFar, lightDistance + halfDepth + margin);
+      }
+
+      const shadowRadius = Math.max(shadowCamera.right, Math.hypot(dominoSize.x, dominoSize.z) * 0.6);
+      if (shadowRadius > shadowCamera.right || shadowFar > shadowCamera.far) {
+        shadowCamera.left = -shadowRadius;
+        shadowCamera.right = shadowRadius;
+        shadowCamera.top = shadowRadius;
+        shadowCamera.bottom = -shadowRadius;
+        shadowCamera.far = Math.max(shadowFar, shadowCamera.far);
+        shadowCamera.updateProjectionMatrix();
       }
     }
+    sunlight.target.position.copy(shadowCenter);
+    sunlight.position.copy(shadowCenter).addScaledVector(sunlightOffset, lightDistance / sunlightDistance);
+    sunlight.target.updateMatrixWorld();
   }
 
   function updateSideFrame(reveal = 1) {
-    const { board, rock, launcher, dominoChain } = breakout;
+    const { board, rock, launcher, dominoChain, cupExplosion } = breakout;
     dominoChain.getCameraBounds(dominoBounds);
+    if (dominoChain.liquidBall.burst && cupExplosion) {
+      dominoBounds.union(cupExplosion.getBounds(cupBounds));
+    }
     boardBounds.setFromObject(board);
     dominoBounds.union(boardBounds);
     rockBounds.setFromObject(rock);

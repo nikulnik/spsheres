@@ -3,7 +3,14 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const EXPLOSION_DELAY = 0.6;
 const FRAGMENTS_PER_RING = 12;
-const GRAVITY = 24;
+const GRAVITY = 9.81;
+const GROUND_RESTITUTION = 0.24;
+const GROUND_FRICTION = 0.48;
+const MIN_BOUNCE_SPEED = 1.6;
+const GROUND_ROLL_RESISTANCE = 6.5;
+const SLEEP_SPEED = 0.4;
+const SLEEP_SPIN = 0.14;
+const FRAME_LOOK_AHEAD = 0.45;
 
 function createFractureSites(bounds, random) {
   const center = bounds.getCenter(new THREE.Vector3());
@@ -104,8 +111,13 @@ export function createCupExplosion(backdrop, model, onCollision) {
   debris.name = 'Cup fragments';
   const center = bounds.getCenter(new THREE.Vector3());
   const height = bounds.max.y - bounds.min.y;
+  const launchSpeed = Math.sqrt(GRAVITY * height);
+  // Direct the burst into the backdrop and past the smaller cups.
+  const backDrift = Math.sign(center.x) * launchSpeed * 1.05;
+  const forwardDrift = launchSpeed * 0.55;
   const shards = [];
   const fragmentBounds = new THREE.Box3();
+  const fragmentSize = new THREE.Vector3();
   for (const fragment of fragments) {
     if (fragment.children.length === 0) continue;
     fragmentBounds.setFromObject(fragment).getCenter(fragment.position);
@@ -114,22 +126,129 @@ export function createCupExplosion(backdrop, model, onCollision) {
     }
     const heading = Math.atan2(fragment.position.z - center.z, fragment.position.x - center.x)
       + (random() - 0.5) * 0.8;
-    const speed = height * (0.66 + random() * 0.65);
-    const velocity = new THREE.Vector3(Math.cos(heading) * speed, height * (0.38 + random() * 0.55),
-      Math.sin(heading) * speed);
-    const spinAxis = new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5).normalize();
-    const radius = fragmentBounds.getSize(new THREE.Vector3()).length() / 2;
-    shards.push({ fragment, velocity, spinAxis, radius, spinSpeed: 2.8 + random() * 5, resting: false });
+    const radius = fragmentBounds.getSize(fragmentSize).length() / 2;
+    const relativeSize = Math.min(radius / (height * 0.29), 1);
+    // Smaller pieces launch and spin faster, with more air resistance.
+    const speed = launchSpeed * (1.5 + random() * 1.08) * (1.15 - relativeSize * 0.34);
+    const lift = launchSpeed * (0.28 + random() ** 1.4 * 0.83) * (1.04 - relativeSize * 0.3);
+    const velocity = new THREE.Vector3(
+      Math.cos(heading) * speed * 0.7 + backDrift,
+      lift,
+      Math.sin(heading) * speed + forwardDrift,
+    );
+    const spin = new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5).normalize();
+    spin.multiplyScalar((3.4 + random() * 5.2) * (1.35 - relativeSize * 0.64));
+    shards.push({
+      fragment,
+      velocity,
+      spin,
+      radius,
+      drag: 0.25 + (1 - relativeSize) * 0.39,
+      inverseInertia: 2.5 / Math.max(radius ** 2, 1e-6),
+      resting: false,
+    });
     debris.add(fragment);
   }
 
   const rotation = new THREE.Quaternion();
-  const up = new THREE.Vector3();
+  const groundNormal = new THREE.Vector3(0, 1, 0);
+  const localUp = new THREE.Vector3();
+  const spinAxis = new THREE.Vector3();
+  const contact = new THREE.Vector3();
+  const contactVelocity = new THREE.Vector3();
+  const tangent = new THREE.Vector3();
+  const torque = new THREE.Vector3();
+  const frameCorner = new THREE.Vector3();
   let movingShards = shards.length;
   let shattered = false;
   let timeAfterSplash = 0;
 
+  // Use impulses and rotational inertia per unit mass for each shard.
+  function applyImpulse(shard, direction, speedChange, limit = Infinity) {
+    torque.crossVectors(contact, direction);
+    const inverseContactMass = 1 + torque.lengthSq() * shard.inverseInertia;
+    const impulse = Math.min(speedChange / inverseContactMass, limit);
+    shard.velocity.addScaledVector(direction, impulse);
+    shard.spin.addScaledVector(torque, impulse * shard.inverseInertia);
+    return impulse;
+  }
+
+  function resolveGroundContact(shard, delta) {
+    const { fragment, velocity, spin, radius } = shard;
+    if (fragment.position.y > radius) return;
+
+    // The lowest vertex of the rotated shard gives the actual point of impact.
+    localUp.copy(groundNormal).applyQuaternion(rotation.copy(fragment.quaternion).invert());
+    let lowest = Infinity;
+    for (const mesh of fragment.children) {
+      const { array } = mesh.geometry.attributes.position;
+      for (let index = 0; index < array.length; index += 3) {
+        const x = array[index];
+        const y = array[index + 1];
+        const z = array[index + 2];
+        const projection = localUp.x * x + localUp.y * y + localUp.z * z;
+        if (projection >= lowest) continue;
+        lowest = projection;
+        contact.set(x, y, z);
+      }
+    }
+    if (fragment.position.y + lowest > 0) return;
+
+    fragment.position.y = -lowest;
+    contact.applyQuaternion(fragment.quaternion);
+    contactVelocity.crossVectors(spin, contact).add(velocity);
+    const normalSpeed = contactVelocity.y;
+    if (normalSpeed < 0) {
+      const bounce = normalSpeed < -MIN_BOUNCE_SPEED ? GROUND_RESTITUTION : 0;
+      const impulse = applyImpulse(shard, groundNormal, -(1 + bounce) * normalSpeed);
+      contactVelocity.crossVectors(spin, contact).add(velocity);
+      tangent.set(-contactVelocity.x, 0, -contactVelocity.z);
+      const slipSpeed = tangent.length();
+      if (slipSpeed > 1e-6) {
+        tangent.multiplyScalar(1 / slipSpeed);
+        applyImpulse(shard, tangent, slipSpeed, GROUND_FRICTION * impulse);
+      }
+    }
+
+    if (velocity.y > MIN_BOUNCE_SPEED) return;
+    const rollRetention = Math.exp(-GROUND_ROLL_RESISTANCE * delta);
+    velocity.x *= rollRetention;
+    velocity.z *= rollRetention;
+    spin.multiplyScalar(rollRetention);
+    const spinSpeedSq = spin.lengthSq();
+    const slowSpin = spinSpeedSq < SLEEP_SPIN ** 2 || spinSpeedSq * radius ** 2 < SLEEP_SPEED ** 2;
+    if (velocity.lengthSq() < SLEEP_SPEED ** 2 && slowSpin) {
+      velocity.set(0, 0, 0);
+      spin.set(0, 0, 0);
+      shard.resting = true;
+      movingShards -= 1;
+    }
+  }
+
   return {
+    getBounds(target) {
+      target.copy(bounds);
+      const reveal = THREE.MathUtils.smoothstep(timeAfterSplash, 0, EXPLOSION_DELAY);
+      if (reveal > 0) {
+        for (const { fragment, velocity, radius } of shards) {
+          const { x, y, z } = fragment.position;
+          const dx = velocity.x * FRAME_LOOK_AHEAD;
+          const dz = velocity.z * FRAME_LOOK_AHEAD;
+          const riseTime = THREE.MathUtils.clamp(velocity.y / GRAVITY, 0, FRAME_LOOK_AHEAD);
+          const apex = y + (velocity.y - GRAVITY * riseTime / 2) * riseTime;
+          target.expandByPoint(frameCorner.set(
+            x + Math.min(0, dx) - radius, 0, z + Math.min(0, dz) - radius,
+          ));
+          target.expandByPoint(frameCorner.set(
+            x + Math.max(0, dx) + radius, apex + radius, z + Math.max(0, dz) + radius,
+          ));
+        }
+        target.min.lerp(bounds.min, 1 - reveal);
+        target.max.lerp(bounds.max, 1 - reveal);
+      }
+      backdrop.updateWorldMatrix(true, false);
+      return target.applyMatrix4(backdrop.matrixWorld);
+    },
     update(delta) {
       if (movingShards === 0) return;
       if (!shattered) {
@@ -143,37 +262,19 @@ export function createCupExplosion(backdrop, model, onCollision) {
         return;
       }
 
-      const airRetention = Math.exp(-0.78 * delta);
-      const groundRetention = Math.exp(-8 * delta);
       for (const shard of shards) {
         if (shard.resting) continue;
-        const { fragment, velocity, spinAxis, radius } = shard;
-        velocity.multiplyScalar(airRetention);
+        const { fragment, velocity, spin, drag } = shard;
+        velocity.multiplyScalar(Math.exp(-drag * delta));
         velocity.y -= GRAVITY * delta;
         fragment.position.addScaledVector(velocity, delta);
-        fragment.quaternion.premultiply(rotation.setFromAxisAngle(spinAxis, shard.spinSpeed * delta));
-        if (fragment.position.y > radius) continue;
-
-        // Find the lowest rotated vertex in the backdrop's ground plane.
-        up.set(0, 1, 0).applyQuaternion(rotation.copy(fragment.quaternion).invert());
-        let lowest = Infinity;
-        for (const mesh of fragment.children) {
-          const { array } = mesh.geometry.attributes.position;
-          for (let i = 0; i < array.length; i += 3) {
-            lowest = Math.min(lowest, up.x * array[i] + up.y * array[i + 1] + up.z * array[i + 2]);
-          }
+        spin.multiplyScalar(Math.exp(-drag * 0.35 * delta));
+        const angularSpeed = spin.length();
+        if (angularSpeed > 1e-8) {
+          spinAxis.copy(spin).multiplyScalar(1 / angularSpeed);
+          fragment.quaternion.premultiply(rotation.setFromAxisAngle(spinAxis, angularSpeed * delta));
         }
-        if (fragment.position.y + lowest > 0) continue;
-        fragment.position.y = -lowest;
-        velocity.y = Math.max(velocity.y, -velocity.y * 0.24);
-        if (velocity.y < 0.55) velocity.y = 0;
-        velocity.x *= groundRetention;
-        velocity.z *= groundRetention;
-        shard.spinSpeed *= groundRetention;
-        if (velocity.lengthSq() < 0.045 && shard.spinSpeed < 0.16) {
-          shard.resting = true;
-          movingShards -= 1;
-        }
+        resolveGroundContact(shard, delta);
       }
     },
   };
