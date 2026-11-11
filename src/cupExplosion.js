@@ -3,6 +3,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const EXPLOSION_DELAY = 0.6;
 const FRAGMENTS_PER_RING = 12;
+const FRAGMENT_TIME_SCALE = 2.5;
+const PHYSICS_STEP = 1 / 120;
 const GRAVITY = 9.81;
 const GROUND_RESTITUTION = 0.24;
 const GROUND_FRICTION = 0.48;
@@ -162,6 +164,7 @@ export function createCupExplosion(backdrop, model, onCollision) {
   let movingShards = shards.length;
   let shattered = false;
   let timeAfterSplash = 0;
+  let accumulator = 0;
 
   // Use impulses and rotational inertia per unit mass for each shard.
   function applyImpulse(shard, direction, speedChange, limit = Infinity) {
@@ -225,16 +228,34 @@ export function createCupExplosion(backdrop, model, onCollision) {
     }
   }
 
+  function simulateStep(delta) {
+    for (const shard of shards) {
+      if (shard.resting) continue;
+      const { fragment, velocity, spin, drag } = shard;
+      velocity.multiplyScalar(Math.exp(-drag * delta));
+      velocity.y -= GRAVITY * delta;
+      fragment.position.addScaledVector(velocity, delta);
+      spin.multiplyScalar(Math.exp(-drag * 0.35 * delta));
+      const angularSpeed = spin.length();
+      if (angularSpeed > 1e-8) {
+        spinAxis.copy(spin).multiplyScalar(1 / angularSpeed);
+        fragment.quaternion.premultiply(rotation.setFromAxisAngle(spinAxis, angularSpeed * delta));
+      }
+      resolveGroundContact(shard, delta);
+    }
+  }
+
   return {
     getBounds(target) {
       target.copy(bounds);
       const reveal = THREE.MathUtils.smoothstep(timeAfterSplash, 0, EXPLOSION_DELAY);
       if (reveal > 0) {
+        const lookAhead = FRAME_LOOK_AHEAD * FRAGMENT_TIME_SCALE;
         for (const { fragment, velocity, radius } of shards) {
           const { x, y, z } = fragment.position;
-          const dx = velocity.x * FRAME_LOOK_AHEAD;
-          const dz = velocity.z * FRAME_LOOK_AHEAD;
-          const riseTime = THREE.MathUtils.clamp(velocity.y / GRAVITY, 0, FRAME_LOOK_AHEAD);
+          const dx = velocity.x * lookAhead;
+          const dz = velocity.z * lookAhead;
+          const riseTime = THREE.MathUtils.clamp(velocity.y / GRAVITY, 0, lookAhead);
           const apex = y + (velocity.y - GRAVITY * riseTime / 2) * riseTime;
           target.expandByPoint(frameCorner.set(
             x + Math.min(0, dx) - radius, 0, z + Math.min(0, dz) - radius,
@@ -262,19 +283,11 @@ export function createCupExplosion(backdrop, model, onCollision) {
         return;
       }
 
-      for (const shard of shards) {
-        if (shard.resting) continue;
-        const { fragment, velocity, spin, drag } = shard;
-        velocity.multiplyScalar(Math.exp(-drag * delta));
-        velocity.y -= GRAVITY * delta;
-        fragment.position.addScaledVector(velocity, delta);
-        spin.multiplyScalar(Math.exp(-drag * 0.35 * delta));
-        const angularSpeed = spin.length();
-        if (angularSpeed > 1e-8) {
-          spinAxis.copy(spin).multiplyScalar(1 / angularSpeed);
-          fragment.quaternion.premultiply(rotation.setFromAxisAngle(spinAxis, angularSpeed * delta));
-        }
-        resolveGroundContact(shard, delta);
+      // Speed up the full motion without enlarging ground-contact steps.
+      accumulator += delta * FRAGMENT_TIME_SCALE;
+      while (accumulator >= PHYSICS_STEP) {
+        simulateStep(PHYSICS_STEP);
+        accumulator -= PHYSICS_STEP;
       }
     },
   };
