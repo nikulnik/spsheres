@@ -47,6 +47,9 @@ One balloon pop leads into a trimmed wet splat. The 0.54-second mix is peak-limi
 https://bigsoundbank.com/balloon-burst-s0551.html
 https://freesound.org/people/nebulasnails/sounds/495118/
 
-Cup explosion
+Cup shatter
 
-cup-explosion.ogg mixes a synthesized blast with pitched variants of the CC0 Kenney glass impacts listed above. The 0.49-second mix is encoded as mono OGG Vorbis.
+cup-explosion.ogg — "ceramic cup shatters on tile floor" by geraldfiebig, CC0 1.0.
+https://freesound.org/people/geraldfiebig/sounds/524999/
+https://cdn.freesound.org/previews/524/524999_4438201-hq.mp3
+The high-quality preview was trimmed to 1.60 seconds, faded out, and encoded as mono OGG Vorbis.
