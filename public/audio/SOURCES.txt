@@ -33,10 +33,16 @@ Source: https://opengameart.org/content/75-cc0-breaking-falling-hit-sfx
 Download: https://opengameart.org/sites/default/files/sfx_breaking_and_falling.zip
 The wood and rock hits were mixed at 0.6 and 0.75 gain, peak-limited, and transcoded to OGG Vorbis.
 
+Board flight
+
+plank-whoosh.ogg — "Stick - Whoosh 9 (Airy)" by Sadiquecat, CC0 1.0.
+The high-quality preview was trimmed to 0.55 seconds, high-pass filtered, and faded at both ends for looping. It is encoded as mono OGG Vorbis.
+https://freesound.org/people/Sadiquecat/sounds/802467/
+https://cdn.freesound.org/previews/802/802467_5287430-hq.mp3
+
 Pink liquid bubble burst
 
-liquid-burst.ogg — layered "bubble bursting" by florianreichelt and "Water Splash 1" by qubodup, both CC0 1.0.
-https://freesound.org/people/florianreichelt/sounds/683097/
-https://freesound.org/people/qubodup/sounds/210428/
-The high-quality previews were trimmed and mixed so the pop leads into the sound of water splashing onto soil.
-The 0.42-second blend has a short fade on the water tail and is peak-limited and encoded as mono OGG Vorbis.
+liquid-burst.ogg — layered "Balloon: burst" by Joseph Sardin and "Wet Splat 1.mp3" by nebulasnails, both CC0 1.0.
+One balloon pop leads into a trimmed wet splat. The 0.54-second mix is peak-limited and encoded as mono OGG Vorbis.
+https://bigsoundbank.com/balloon-burst-s0551.html
+https://freesound.org/people/nebulasnails/sounds/495118/

@@ -21,6 +21,7 @@ const arena = createArenaScene(canvas, {
   onCollision: collisionAudio.play,
   onCameraZoom: collisionAudio.setCameraZoom,
   onBreakout: (position) => collisionAudio.play({ type: 'breakout', intensity: 1, x: position.x }),
+  onBoardFlight: collisionAudio.setBoardFlight,
 });
 const unlockAudio = () => collisionAudio.unlock();
 window.addEventListener('pointerdown', unlockAudio, { passive: true });

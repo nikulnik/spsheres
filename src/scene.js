@@ -678,7 +678,7 @@ function addRail(group, geometry, material, x, y, z) {
   return rail;
 }
 
-export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout } = {}) {
+export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout, onBoardFlight } = {}) {
   const { frameWidth, frameHeight, courtHeightInFrame, cameraElevation, cameraZoom } = SCENE_CONFIG;
   const elevation = THREE.MathUtils.degToRad(cameraElevation);
   const sinElevation = Math.sin(elevation);
@@ -947,6 +947,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
       groundRestTime: 0,
       groundContactCount: 0,
       sleeping: false,
+      inFlight: true,
       elapsed: 0,
       landingTime: 0,
       phase: 'flight',
@@ -1099,8 +1100,11 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     if (applyContactResponse(contactNormal, contactOffset, ROCK_RESTITUTION, ROCK_FRICTION, 0.8)) {
       const firstRockImpact = rock === breakout.rock && !breakout.hitRock;
       breakout.hitRock = true;
-      if (!silent && firstRockImpact) {
-        onCollision?.({ type: 'rock', intensity, x: board.position.x, z: board.position.z });
+      if (firstRockImpact) {
+        breakout.inFlight = false;
+        if (!silent) {
+          onCollision?.({ type: 'rock', intensity, x: board.position.x, z: board.position.z });
+        }
       }
     }
   }
@@ -1213,6 +1217,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     spin.copy(spinAxis).multiplyScalar(SECOND_LAUNCH_SPIN);
     spin.y += 0.85;
     breakout.sleeping = false;
+    breakout.inFlight = true;
     breakout.groundRestTime = 0;
     breakout.phase = 'secondFlight';
     breakout.phaseTime = 0;
@@ -1273,7 +1278,9 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     if (breakout.phase === 'secondFlight' && breakout.launcher) {
       resolveRockCollision(breakout.launcher.mesh, ROCK_RADIUS * SECOND_ROCK_SCALE, silent);
     }
+    const descending = velocity.y <= 0;
     const grounded = resolveGroundCollision();
+    if (grounded && descending) breakout.inFlight = false;
     dominoChain?.update(delta, board);
     updateDominoSequence();
     const nearlyStill = velocity.lengthSq() < GROUND_SLEEP_SPEED ** 2
@@ -1308,7 +1315,8 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
       breakoutAccumulator -= BOARD_PHYSICS_STEP;
     }
 
-    const { board, dominoChain } = breakout;
+    const { board, dominoChain, inFlight } = breakout;
+    onBoardFlight?.(inFlight ? board.position.x : null);
     const shadowCenter = dominoChain?.started
       ? dominoChain.getFinalBounds(dominoBounds).getCenter(dominoCenter)
       : board.position;

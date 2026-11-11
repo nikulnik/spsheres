@@ -18,18 +18,20 @@ const SOUND_FILES = Object.freeze({
   ],
   breakout: ['plank-break.ogg'],
   rock: ['plank-rock.ogg'],
+  whoosh: ['plank-whoosh.ogg'],
   splash: ['liquid-burst.ogg'],
 });
 
 const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07 });
 const SOUND_VOLUME = Object.freeze({
-  ball: 0.24, wall: 0.32, domino: 0.85, breakout: 0.9, rock: 0.9, splash: 0.95,
+  ball: 0.24, wall: 0.32, domino: 0.85, breakout: 0.9, rock: 0.9, whoosh: 0.62, splash: 0.95,
 });
 const GLOBAL_PLAY_INTERVAL = 0.02;
 const MAX_VOICES = 12;
 const MASTER_VOLUME = 0.7;
 const SILENT_CAMERA_ZOOM = 0.08;
 const CAMERA_VOLUME_RAMP = 0.12;
+const WHOOSH_FADE = 0.12;
 const DOMINO_IMPACT_COUNT = 11;
 const DOMINO_FIRST_PLAYBACK_RATE = 1.08;
 const DOMINO_LAST_PLAYBACK_RATE = 0.54;
@@ -45,6 +47,7 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
   let master;
   let dominoMaster;
   let recordingDestination;
+  let whooshVoice;
   let activeVoices = 0;
   let lastPlayTime = -Infinity;
   let distanceLevel = 1;
@@ -122,6 +125,59 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
     master.gain.linearRampToValueAtTime(MASTER_VOLUME * distanceLevel, now + CAMERA_VOLUME_RAMP);
   }
 
+  function getPan(x) {
+    return Math.max(-0.75, Math.min(0.75, (x / panRange) * 0.75));
+  }
+
+  function createSampleVoice(buffer, x, output) {
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    const gain = context.createGain();
+    const panner = context.createStereoPanner();
+    panner.pan.value = getPan(x);
+    source.connect(gain);
+    gain.connect(panner);
+    panner.connect(output);
+    activeVoices += 1;
+    source.onended = () => {
+      activeVoices -= 1;
+      source.disconnect();
+      gain.disconnect();
+      panner.disconnect();
+    };
+    return { source, gain, panner };
+  }
+
+  function setBoardFlight(x) {
+    if (x === null) {
+      if (!whooshVoice) return;
+      const { source, gain } = whooshVoice;
+      whooshVoice = undefined;
+      const now = context.currentTime;
+      const volume = gain.gain.value;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.linearRampToValueAtTime(0, now + WHOOSH_FADE);
+      source.stop(now + WHOOSH_FADE);
+      return;
+    }
+
+    const sample = buffers.whoosh?.[0];
+    if (!sample || context?.state !== 'running') return;
+    if (whooshVoice) {
+      whooshVoice.panner.pan.value = getPan(x);
+      return;
+    }
+
+    whooshVoice = createSampleVoice(sample, x, master);
+    const { source, gain } = whooshVoice;
+    const now = context.currentTime;
+    source.loop = true;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(SOUND_VOLUME.whoosh, now + WHOOSH_FADE);
+    source.start(now);
+  }
+
   function playFinalDomino(x) {
     if (!context || context.state !== 'running') return;
 
@@ -129,7 +185,7 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
 
     function routeVoice(source, ...nodes) {
       const panner = context.createStereoPanner();
-      panner.pan.value = Math.max(-0.75, Math.min(0.75, (x / panRange) * 0.75));
+      panner.pan.value = getPan(x);
       let previous = source;
       for (const node of nodes) {
         previous.connect(node);
@@ -222,8 +278,9 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
     lastPlayTime = now;
     lastKindTime[type] = now;
 
-    const source = context.createBufferSource();
-    source.buffer = samples[sampleIndex];
+    const { source, gain } = createSampleVoice(
+      samples[sampleIndex], x, useDominoMaster ? dominoMaster : master,
+    );
     if (isDomino) {
       source.playbackRate.value = DOMINO_FIRST_PLAYBACK_RATE
         * (DOMINO_LAST_PLAYBACK_RATE / DOMINO_FIRST_PLAYBACK_RATE) ** dominoProgress;
@@ -234,21 +291,7 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
     const volumeScale = isDomino
       ? DOMINO_FIRST_VOLUME + (DOMINO_LAST_VOLUME - DOMINO_FIRST_VOLUME) * dominoProgress
       : 0.3 + strength * 0.7;
-    const gain = context.createGain();
     gain.gain.value = SOUND_VOLUME[type] * volumeScale;
-    const panner = context.createStereoPanner();
-    panner.pan.value = Math.max(-0.75, Math.min(0.75, (x / panRange) * 0.75));
-
-    source.connect(gain);
-    gain.connect(panner);
-    panner.connect(useDominoMaster ? dominoMaster : master);
-    activeVoices += 1;
-    source.onended = () => {
-      activeVoices -= 1;
-      source.disconnect();
-      gain.disconnect();
-      panner.disconnect();
-    };
     source.start();
   }
 
@@ -259,5 +302,5 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
     }
   }
 
-  return { play, unlock, setCameraZoom, addToStream };
+  return { play, unlock, setCameraZoom, setBoardFlight, addToStream };
 }
