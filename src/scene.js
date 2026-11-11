@@ -954,6 +954,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
       phaseTime: 0,
       launcher: null,
       dominoChain: null,
+      cupExplosion: null,
     };
     const landing = predictBoardGroundContact();
     if (landing) {
@@ -972,7 +973,10 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
       cameraFocus.subVectors(dominoChain.group.position, rock.position);
       const farSide = sideDirection.dot(cameraFocus) < 0 ? -1 : 1;
       sideDirection.multiplyScalar(farSide);
-      cupsReady.then((cups) => addDominoCups(dominoChain, cups, farSide));
+      const liveBreakout = breakout;
+      cupsReady.then((cups) => {
+        liveBreakout.cupExplosion = addDominoCups(dominoChain, cups, farSide, onCollision);
+      });
     }
   }
 
@@ -1239,7 +1243,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     if (progress === 1) launcher.complete = true;
   }
 
-  function updateDominoSequence() {
+  function updateDominoSequence(delta) {
     const { dominoChain } = breakout;
     if (!dominoChain?.started) return;
     if (breakout.phase === 'flight') {
@@ -1249,6 +1253,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     if (!breakout.launcher && dominoChain.dominoes[1]?.angle > 0) {
       startLauncher();
     }
+    if (dominoChain.liquidBall.burst) breakout.cupExplosion?.update(delta);
   }
 
   function simulateBreakoutStep(delta, silent = false) {
@@ -1259,7 +1264,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
       boardBounds.setFromObject(board);
       if (boardBounds.min.y <= ground.position.y + 0.02) {
         dominoChain?.update(delta, board);
-        updateDominoSequence();
+        updateDominoSequence(delta);
         return false;
       }
       breakout.sleeping = false;
@@ -1282,7 +1287,7 @@ export function createArenaScene(canvas, { onCollision, onCameraZoom, onBreakout
     const grounded = resolveGroundCollision();
     if (grounded && descending) breakout.inFlight = false;
     dominoChain?.update(delta, board);
-    updateDominoSequence();
+    updateDominoSequence(delta);
     const nearlyStill = velocity.lengthSq() < GROUND_SLEEP_SPEED ** 2
       && spin.lengthSq() < GROUND_SLEEP_SPIN ** 2;
 

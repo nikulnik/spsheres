@@ -20,11 +20,13 @@ const SOUND_FILES = Object.freeze({
   rock: ['plank-rock.ogg'],
   whoosh: ['plank-whoosh.ogg'],
   splash: ['liquid-burst.ogg'],
+  cupExplosion: ['cup-explosion.ogg'],
 });
 
 const PLAY_INTERVAL = Object.freeze({ ball: 0.045, wall: 0.07 });
 const SOUND_VOLUME = Object.freeze({
   ball: 0.24, wall: 0.32, domino: 0.85, breakout: 0.9, rock: 0.9, whoosh: 0.62, splash: 0.95,
+  cupExplosion: 1,
 });
 const GLOBAL_PLAY_INTERVAL = 0.02;
 const MAX_VOICES = 12;
@@ -252,8 +254,8 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
     const samples = buffers[type];
     const isBoardImpact = type === 'breakout' || type === 'rock';
     const isDomino = type === 'domino';
-    const isSplash = type === 'splash';
-    const useDominoMaster = isDomino || isSplash;
+    const isFinaleEffect = type === 'splash' || type === 'cupExplosion';
+    const useDominoMaster = isDomino || isFinaleEffect;
     const bypassesLimits = isBoardImpact || useDominoMaster;
     if (
       (!useDominoMaster && distanceLevel === 0)
@@ -285,7 +287,7 @@ export function createCollisionAudio({ panRange = 4.5, initialZoom = 0.78 } = {}
       source.playbackRate.value = DOMINO_FIRST_PLAYBACK_RATE
         * (DOMINO_LAST_PLAYBACK_RATE / DOMINO_FIRST_PLAYBACK_RATE) ** dominoProgress;
     } else {
-      source.playbackRate.value = isBoardImpact || isSplash ? 1 : 0.96 + strength * 0.08;
+      source.playbackRate.value = isBoardImpact || isFinaleEffect ? 1 : 0.96 + strength * 0.08;
     }
 
     const volumeScale = isDomino

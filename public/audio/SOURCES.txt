@@ -46,3 +46,7 @@ liquid-burst.ogg — layered "Balloon: burst" by Joseph Sardin and "Wet Splat 1.
 One balloon pop leads into a trimmed wet splat. The 0.54-second mix is peak-limited and encoded as mono OGG Vorbis.
 https://bigsoundbank.com/balloon-burst-s0551.html
 https://freesound.org/people/nebulasnails/sounds/495118/
+
+Cup explosion
+
+cup-explosion.ogg mixes a synthesized blast with pitched variants of the CC0 Kenney glass impacts listed above. The 0.49-second mix is encoded as mono OGG Vorbis.

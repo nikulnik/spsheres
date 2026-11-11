@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createCupExplosion } from './cupExplosion.js';
 
 const CUP_LAYOUT = [
   { name: 'tea_cup', anchor: 2, along: 0.25, behind: 11.2, height: 1.8, yaw: -0.65 },
@@ -30,14 +31,16 @@ export async function loadDominoCups(environment) {
   return cups;
 }
 
-export function addDominoCups(chain, cups, farSide) {
+export function addDominoCups(chain, cups, farSide, onCollision) {
   if (cups.length === 0) return;
   const backdrop = new THREE.Group();
   backdrop.name = 'Domino cup backdrop';
   const bounds = new THREE.Box3();
   const center = new THREE.Vector3();
+  let largest = cups[0];
 
-  for (const { model, anchor, along, behind, height, yaw } of cups) {
+  for (const cup of cups) {
+    const { model, anchor, along, behind, height, yaw } = cup;
     const { pivotZ, depth } = chain.dominoes[anchor];
     model.rotation.y = yaw + (farSide < 0 ? Math.PI : 0);
     bounds.setFromObject(model);
@@ -46,6 +49,8 @@ export function addDominoCups(chain, cups, farSide) {
     model.position.set(farSide * behind - center.x, -bounds.min.y,
       pivotZ - depth / 2 + along - center.z);
     backdrop.add(model);
+    if (height > largest.height) largest = cup;
   }
   chain.group.add(backdrop);
+  return createCupExplosion(backdrop, largest.model, onCollision);
 }
